@@ -373,7 +373,7 @@ func (r *ReconcileKnativeServing) installKourier(instance *servingv1alpha1.Knati
 
 // createConsoleCLIDownload creates CR for kn CLI download link
 func (r *ReconcileKnativeServing) createConsoleCLIDownload(instance *servingv1alpha1.KnativeServing) error {
-	return consoleclidownload.Create(instance, r.client)
+	return consoleclidownload.Create(instance, r.client, r.scheme)
 }
 
 // general clean-up, mostly resources in different namespaces from servingv1alpha1.KnativeServing.
