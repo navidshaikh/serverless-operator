@@ -1,0 +1,155 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+ name: serverless-operator
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  namespace: serverless-operator
+  name: kn-downloads
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: serverless-operator
+      component: kn-downloads
+  template:
+    metadata:
+      name: kn-downloads
+      labels:
+        app: serverless-operator
+        component: kn-downloads
+    spec:
+      nodeSelector:
+        kubernetes.io/os: "linux"
+      tolerations:
+      - key: node-role.kubernetes.io/master
+        operator: Exists
+        effect: "NoSchedule"
+      - key: "node.kubernetes.io/unreachable"
+        operator: "Exists"
+        effect: "NoExecute"
+        tolerationSeconds: 120
+      - key: "node.kubernetes.io/not-ready"
+        operator: "Exists"
+        effect: "NoExecute"
+        tolerationSeconds: 120
+      containers:
+      - name: kn-download-server
+        terminationMessagePolicy: FallbackToLogsOnError
+        image: quay.io/openshift-knative/kn-cli-artifacts:latest
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 8080
+          name: http
+          protocol: TCP
+        livenessProbe:
+          httpGet:
+            path: /
+            port: 8080
+            scheme: HTTP
+        readinessProbe:
+          failureThreshold: 3
+          httpGet:
+            path: /
+            port: 8080
+            scheme: HTTP
+        command: ["/bin/sh"]
+        resources:
+          requests:
+            cpu: 10m
+            memory: 50Mi
+        args:
+        - '-c'
+        - |
+          cat <<EOF >>/tmp/serve.py
+          import BaseHTTPServer, os, re, signal, SimpleHTTPServer, socket, sys, tarfile, tempfile, threading, time, zipfile
+
+          signal.signal(signal.SIGTERM, lambda signum, frame: sys.exit(0))
+
+          # Launch multiple listeners as threads
+          class Thread(threading.Thread):
+              def __init__(self, i, socket):
+                  threading.Thread.__init__(self)
+                  self.i = i
+                  self.socket = socket
+                  self.daemon = True
+                  self.start()
+
+              def run(self):
+                  httpd = BaseHTTPServer.HTTPServer(addr, SimpleHTTPServer.SimpleHTTPRequestHandler, False)
+
+                  # Prevent the HTTP server from re-binding every handler.
+                  # https://stackoverflow.com/questions/46210672/
+                  httpd.socket = self.socket
+                  httpd.server_bind = self.server_close = lambda self: None
+
+                  httpd.serve_forever()
+
+          temp_dir = tempfile.mkdtemp()
+          print('serving from {}'.format(temp_dir))
+          os.chdir(temp_dir)
+          for arch in ['amd64']:
+              os.mkdir(arch)
+              for operating_system in ['linux', 'macos', 'windows']:
+                  os.mkdir(os.path.join(arch, operating_system))
+
+          for arch, operating_system, path in [
+                  ('amd64', 'linux', '/usr/share/kn/linux_amd64/kn-linux-amd64.tar.gz'),
+                  ('amd64', 'macos', '/usr/share/kn/macos/kn-macos-amd64.tar.gz'),
+                  ('amd64', 'windows', '/usr/share/kn/windows/kn-windows-amd64.zip'),
+                  ]:
+              basename = os.path.basename(path)
+              target_path = os.path.join(arch, operating_system, basename)
+              os.symlink(path, target_path)
+
+          # Create socket
+          # IPv6 should handle IPv4 passively so long as it is not bound to a
+          # specific address or set to IPv6_ONLY
+          # https://stackoverflow.com/questions/25817848/python-3-does-http-server-support-ipv6
+          addr = ('::', 8080)
+          sock = socket.socket(socket.AF_INET6, socket.SOCK_STREAM)
+          sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+          sock.bind(addr)
+          sock.listen(5)
+
+          [Thread(i, socket=sock) for i in range(100)]
+          time.sleep(9e9)
+          EOF
+          exec python2 /tmp/serve.py
+      terminationGracePeriodSeconds: 1
+---
+apiVersion: v1
+kind: Service
+metadata:
+  namespace: serverless-operator
+  name: kn-downloads
+spec:
+  ports:
+  - name: http
+    port: 80
+    protocol: TCP
+    targetPort: 8080
+  selector:
+    app: console
+    component: kn-downloads
+---
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  namespace: serverless-operator
+  name: kn-downloads
+  labels:
+    app: serverless-operator
+    component: kn-downloads
+spec:
+  tls:
+    termination: edge
+    insecureEdgeTerminationPolicy: Redirect
+  port:
+    targetPort: http
+  to:
+    kind: Service
+    name: kn-downloads
+  wildcardPolicy: None
