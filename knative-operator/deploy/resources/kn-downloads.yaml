@@ -21,20 +21,6 @@ spec:
         app: serverless-operator
         component: kn-downloads
     spec:
-      nodeSelector:
-        kubernetes.io/os: "linux"
-      tolerations:
-      - key: node-role.kubernetes.io/master
-        operator: Exists
-        effect: "NoSchedule"
-      - key: "node.kubernetes.io/unreachable"
-        operator: "Exists"
-        effect: "NoExecute"
-        tolerationSeconds: 120
-      - key: "node.kubernetes.io/not-ready"
-        operator: "Exists"
-        effect: "NoExecute"
-        tolerationSeconds: 120
       containers:
       - name: kn-download-server
         terminationMessagePolicy: FallbackToLogsOnError
