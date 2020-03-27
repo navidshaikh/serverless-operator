@@ -393,10 +393,35 @@
   name = "github.com/openshift/api"
   packages = [
     "config/v1",
+    "console/v1",
+    "operator/v1",
     "route/v1",
   ]
   pruneopts = "NT"
   revision = "d4a64ec2cbd86f11ea74dfdcf6520d5833d0c6cd"
+
+[[projects]]
+  digest = "1:3e8b0f8d2ed4b10f83a0719c1e8853bdb4bbce2ca365aba2843dc9487e4ab35c"
+  name = "github.com/openshift/client-go"
+  packages = [
+    "route/clientset/versioned/scheme",
+    "route/clientset/versioned/typed/route/v1",
+  ]
+  pruneopts = "NT"
+  revision = "1fa528d3be060e4c7178eb69e76d37cf7e699e3c"
+  version = "v3.9.0"
+
+[[projects]]
+  branch = "master"
+  digest = "1:97c90f6d4299be0ee8b97264f309055fedaa4cdff14e744902b214360112d7ea"
+  name = "github.com/openshift/console-operator"
+  packages = [
+    "pkg/api",
+    "pkg/console/subresource/route",
+    "pkg/console/subresource/util",
+  ]
+  pruneopts = "NT"
+  revision = "a4e651e43af26b200b0d7e95c35318191af2e041"
 
 [[projects]]
   digest = "1:2f871701d245034b68d5f2d852191e9b96ef2d13c1d79296581e0a42a5bccc6b"
@@ -929,6 +954,9 @@
   name = "knative.dev/pkg"
   packages = [
     "apis",
+    "apis/istio",
+    "apis/istio/common/v1alpha1",
+    "apis/istio/v1alpha3",
     "kmp",
     "ptr",
   ]
@@ -1019,7 +1047,10 @@
     "github.com/manifestival/controller-runtime-client",
     "github.com/manifestival/manifestival",
     "github.com/openshift/api/config/v1",
+    "github.com/openshift/api/console/v1",
     "github.com/openshift/api/route/v1",
+    "github.com/openshift/console-operator/pkg/console/subresource/route",
+    "github.com/openshift/console-operator/pkg/console/subresource/util",
     "github.com/operator-framework/operator-sdk/pkg/k8sutil",
     "github.com/operator-framework/operator-sdk/pkg/kube-metrics",
     "github.com/operator-framework/operator-sdk/pkg/leader",
@@ -1038,13 +1069,17 @@
     "k8s.io/apimachinery/pkg/api/meta",
     "k8s.io/apimachinery/pkg/apis/meta/v1",
     "k8s.io/apimachinery/pkg/apis/meta/v1/unstructured",
+    "k8s.io/apimachinery/pkg/labels",
     "k8s.io/apimachinery/pkg/runtime",
     "k8s.io/apimachinery/pkg/runtime/schema",
+    "k8s.io/apimachinery/pkg/selection",
     "k8s.io/apimachinery/pkg/types",
     "k8s.io/apimachinery/pkg/util/intstr",
+    "k8s.io/apimachinery/pkg/util/sets",
     "k8s.io/client-go/kubernetes/scheme",
     "k8s.io/client-go/plugin/pkg/client/auth",
     "k8s.io/client-go/rest",
+    "knative.dev/pkg/apis/istio/v1alpha3",
     "knative.dev/pkg/ptr",
     "knative.dev/serving-operator/pkg/apis/serving/v1alpha1",
     "sigs.k8s.io/controller-runtime/pkg/client",

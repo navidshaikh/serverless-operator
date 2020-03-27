@@ -118,7 +118,7 @@ spec:
     protocol: TCP
     targetPort: 8080
   selector:
-    app: console
+    app: serverless-operator
     component: kn-downloads
 ---
 apiVersion: route.openshift.io/v1
