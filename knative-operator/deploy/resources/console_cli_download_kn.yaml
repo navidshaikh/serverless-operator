@@ -1,7 +1,7 @@
 apiVersion: console.openshift.io/v1
 kind: ConsoleCLIDownload
 metadata:
-  name: kn
+  name: kn-cli-downloads
 spec:
   description: The OpenShift Serverless client `kn` is a CLI tool that allows you to fully manage OpenShift Serverless Serving and Eventing resources without writing a single line of YAML.
   displayName: kn - OpenShift Serverless Command Line Interface (CLI)
