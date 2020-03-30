@@ -12,6 +12,7 @@ import (
 	routev1 "github.com/openshift/api/route/v1"
 	consoleroute "github.com/openshift/console-operator/pkg/console/subresource/route"
 	consoleutil "github.com/openshift/console-operator/pkg/console/subresource/util"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	servingv1alpha1 "knative.dev/serving-operator/pkg/apis/serving/v1alpha1"
@@ -71,19 +72,26 @@ func createCR(apiclient client.Client) error {
 	log.Info(fmt.Sprintf("Route found for kn %s", knRoute))
 
 	log.Info("Creating ConsoleCLIDownload CR for kn")
-	manifest, err := mfc.NewManifest(manifestPathKnConsoleCLIDownloadCR(), apiclient)
+	consoleObj := populateKnConsoleCLIDownload(knRoute)
+	err = apiclient.Create(context.TODO(), consoleObj)
 	if err != nil {
-		return fmt.Errorf("failed to read kn ConsoleCLIDownload CR manifest: %w", err)
+		return fmt.Errorf("failed to create ConsoleCLIDownload CR: %w", err)
 	}
+	/*
+		manifest, err := mfc.NewManifest(manifestPathKnConsoleCLIDownloadCR(), apiclient)
+		if err != nil {
+			return fmt.Errorf("failed to read kn ConsoleCLIDownload CR manifest: %w", err)
+		}
 
-	manifest, err = manifest.Transform(updateKnDownloadLinks(knRoute))
-	if err != nil {
-		return fmt.Errorf("failed to transform kn ConsoleCLIDownload CR manifest: %w", err)
-	}
+		manifest, err = manifest.Transform(updateKnDownloadLinks(knRoute))
+		if err != nil {
+			return fmt.Errorf("failed to transform kn ConsoleCLIDownload CR manifest: %w", err)
+		}
 
-	if err := manifest.Apply(); err != nil {
-		return fmt.Errorf("failed to apply kn ConsoleCLIDownload CR manifest: %w", err)
-	}
+		if err := manifest.Apply(); err != nil {
+			return fmt.Errorf("failed to apply kn ConsoleCLIDownload CR manifest: %w", err)
+		}
+	*/
 
 	return nil
 }
@@ -115,7 +123,7 @@ func Delete(instance *servingv1alpha1.KnativeServing, apiclient client.Client) e
 }
 
 func manifestPathKnConsoleCLIDownloadDeploy() string {
-	knConsoleCLIDownloadDeploy := os.Getenv("CONSOLE_DOWNLOAD_MANIFEST_PATH")
+	knConsoleCLIDownloadDeploy := os.Getenv("CONSOLE_DOWNLOAD_DEPLOY_MANIFEST_PATH")
 	if knConsoleCLIDownloadDeploy == "" {
 		return defaultKnConsoleCLIDownloadDeployment
 	}
@@ -168,6 +176,36 @@ func populateKnLinks(route string) []consolev1.Link {
 		consolev1.Link{
 			Text: "Download kn for Windows",
 			Href: baseURL + "/amd64/windows/kn-windows-amd64.zip",
+		},
+	}
+}
+
+func populateKnConsoleCLIDownload(baseURL string) *consolev1.ConsoleCLIDownload {
+	return &consolev1.ConsoleCLIDownload{
+		metav1.TypeMeta{
+			Kind:       "ConsoleCLIDownload",
+			APIVersion: "console.openshift.io/v1",
+		},
+		metav1.ObjectMeta{
+			Name: "kn-cli-downloads",
+		},
+		consolev1.ConsoleCLIDownloadSpec{
+			DisplayName: "kn - OpenShift Serverless Command Line Interface (CLI)",
+			Description: "The OpenShift Serverless client `kn` is a CLI tool that allows you to fully manage OpenShift Serverless Serving and Eventing resources without writing a single line of YAML.",
+			Links: []consolev1.Link{
+				consolev1.Link{
+					Text: "Download kn for Linux",
+					Href: baseURL + "/amd64/linux/kn-linux-amd64.tar.gz",
+				},
+				consolev1.Link{
+					Text: "Download kn for macOS",
+					Href: baseURL + "/amd64/macos/kn-macos-amd64.tar.gz",
+				},
+				consolev1.Link{
+					Text: "Download kn for Windows",
+					Href: baseURL + "/amd64/windows/kn-windows-amd64.zip",
+				},
+			},
 		},
 	}
 }
