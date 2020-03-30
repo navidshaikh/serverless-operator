@@ -64,9 +64,11 @@ func createCR(apiclient client.Client) error {
 	}
 
 	knRoute := consoleroute.GetCanonicalHost(route)
-	if knRoute == "" { // TODO: route ingress is not ready yet, add a retry logic here
+	if knRoute == "" {
 		return fmt.Errorf("failed to find kn ConsoleCLIDownload deployment route, it might be ready yet")
 	}
+
+	log.Info(fmt.Sprintf("Route found for kn %s", knRoute))
 
 	log.Info("Creating ConsoleCLIDownload CR for kn")
 	manifest, err := mfc.NewManifest(manifestPathKnConsoleCLIDownloadCR(), apiclient)
@@ -131,7 +133,7 @@ func manifestPathKnConsoleCLIDownloadCR() string {
 func updateKnDownloadLinks(route string) mf.Transformer {
 	return func(u *unstructured.Unstructured) error {
 		scheme := &runtime.Scheme{}
-		if u.GetKind() == "ConsoloeCLIDownload" {
+		if u.GetKind() == "ConsoleCLIDownload" {
 			addToScheme(scheme)
 			obj := &consolev1.ConsoleCLIDownload{}
 			if err := scheme.Convert(u, obj, nil); err != nil {
@@ -141,6 +143,7 @@ func updateKnDownloadLinks(route string) mf.Transformer {
 			if err := scheme.Convert(obj, u, nil); err != nil {
 				return err
 			}
+			log.Info("Transformed kn download links to cluster local")
 		}
 		return nil
 	}
