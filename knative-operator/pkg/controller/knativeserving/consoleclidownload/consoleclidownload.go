@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"time"
 
 	mfc "github.com/manifestival/controller-runtime-client"
 	mf "github.com/manifestival/manifestival"
@@ -53,6 +54,8 @@ func createKnDeployment(apiclient client.Client) error {
 
 func createCR(apiclient client.Client) error {
 	route := &routev1.Route{}
+	// Waiting for the deployment/route to appear. TODO: ideally this should be a watch
+	time.Sleep(time.Second * 10)
 	err := apiclient.Get(context.TODO(),
 		client.ObjectKey{Namespace: knConsoleCLIDownloadDeployNamespace, Name: knConsoleCLIDownloadDeployRoute},
 		route)
