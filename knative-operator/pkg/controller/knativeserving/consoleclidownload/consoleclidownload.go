@@ -132,7 +132,7 @@ func manifestPathKnConsoleCLIDownloadCR() string {
 
 func updateKnDownloadLinks(route string) mf.Transformer {
 	return func(u *unstructured.Unstructured) error {
-		scheme := &runtime.Scheme{}
+		scheme := runtime.NewScheme()
 		if u.GetKind() == "ConsoleCLIDownload" {
 			addToScheme(scheme)
 			obj := &consolev1.ConsoleCLIDownload{}
