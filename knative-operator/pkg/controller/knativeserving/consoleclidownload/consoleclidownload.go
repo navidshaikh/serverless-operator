@@ -128,7 +128,8 @@ func manifestPathKnConsoleCLIDownloadCR() string {
 func updateKnDownloadLinks(route string) mf.Transformer {
 	return func(u *unstructured.Unstructured) error {
 		scheme := &runtime.Scheme{}
-		if u.GetKind() == "ConsoleCLIDownload" {
+		if u.GetKind() == "ConsoloeCLIDownload" {
+			addToScheme(scheme)
 			obj := &consolev1.ConsoleCLIDownload{}
 			if err := scheme.Convert(u, obj, nil); err != nil {
 				return err
@@ -140,6 +141,11 @@ func updateKnDownloadLinks(route string) mf.Transformer {
 		}
 		return nil
 	}
+}
+
+func addToScheme(scheme *runtime.Scheme) {
+	scheme.AddKnownTypes(consolev1.GroupVersion,
+		&consolev1.ConsoleCLIDownload{})
 }
 
 func populateKnLinks(route string) []consolev1.Link {
