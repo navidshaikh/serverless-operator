@@ -137,11 +137,11 @@ func updateKnDownloadLinks(route string) mf.Transformer {
 			addToScheme(scheme)
 			obj := &consolev1.ConsoleCLIDownload{}
 			if err := scheme.Convert(u, obj, nil); err != nil {
-				return err
+				return fmt.Errorf("failed to convert unstructured obj to ConsoleCLIDownload one: %w", err)
 			}
 			obj.Spec.Links = populateKnLinks(route)
 			if err := scheme.Convert(obj, u, nil); err != nil {
-				return err
+				return fmt.Errorf("failed to convert ConsoleCLIDownload obj to unstructured one: %w", err)
 			}
 			log.Info("Transformed kn download links to cluster local")
 		}
