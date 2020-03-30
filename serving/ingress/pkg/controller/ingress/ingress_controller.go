@@ -6,6 +6,7 @@ import (
 	"reflect"
 
 	routev1 "github.com/openshift/api/route/v1"
+	"go.uber.org/zap"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/apimachinery/pkg/api/errors"
@@ -21,12 +22,20 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/source"
 
 	"knative.dev/pkg/logging"
+	"knative.dev/pkg/logging/logkey"
 	"knative.dev/serving/pkg/apis/networking"
 	networkingv1alpha1 "knative.dev/serving/pkg/apis/networking/v1alpha1"
 	"knative.dev/serving/pkg/apis/serving"
 
 	"github.com/openshift-knative/serverless-operator/serving/ingress/pkg/controller/ingress/resources"
 )
+
+var baseLogger *zap.SugaredLogger
+
+func init() {
+	loggingConfig, _ := logging.NewConfigFromMap(nil) // force the default values
+	baseLogger, _ = logging.NewLoggerFromConfig(loggingConfig, "knative-openshift-ingress")
+}
 
 // Add creates a new Ingress Controller and adds it to the Manager. The Manager will set fields on the Controller
 // and Start it when the Manager is Started.
@@ -106,8 +115,8 @@ type ReconcileIngress struct {
 // The Controller will requeue the Request to be processed again if the returned error is non-nil or
 // Result.Requeue is true, otherwise upon completion it will remove the work from the queue.
 func (r *ReconcileIngress) Reconcile(request reconcile.Request) (reconcile.Result, error) {
-	ctx := context.TODO()
-	logger := logging.FromContext(ctx)
+	logger := baseLogger.With(logkey.Key, request.NamespacedName.String())
+	ctx := logging.WithLogger(context.Background(), logger)
 
 	// Fetch the Ingress instance
 	original := &networkingv1alpha1.Ingress{}
@@ -156,12 +165,15 @@ func (r *ReconcileIngress) ReconcileIngress(ctx context.Context, ing *networking
 
 	exposed := ing.Spec.Visibility == networkingv1alpha1.IngressVisibilityExternalIP
 	if exposed {
-		selector, existing, err := r.routeList(ctx, ing)
+		existing, err := r.routeList(ctx, ing)
 		if err != nil {
 			logger.Errorf("Failed to list openshift routes %v", err)
 			return err
 		}
-		existingMap := routeMap(existing, selector)
+		existingMap := make(map[string]routev1.Route, len(existing.Items))
+		for _, route := range existing.Items {
+			existingMap[route.Name] = route
+		}
 
 		routes, err := resources.MakeRoutes(ing)
 		if err != nil {
@@ -204,19 +216,14 @@ func (r *ReconcileIngress) deleteRoute(ctx context.Context, route *routev1.Route
 }
 
 func (r *ReconcileIngress) deleteRoutes(ctx context.Context, ing *networkingv1alpha1.Ingress) error {
-	listOpts := &client.ListOptions{
-		LabelSelector: labels.SelectorFromSet(map[string]string{
-			networking.IngressLabelKey: ing.GetName(),
-		}),
-	}
-	var routeList routev1.RouteList
-	if err := r.client.List(ctx, listOpts, &routeList); err != nil {
-		return err
+	routeList, err := r.routeList(ctx, ing)
+	if err != nil {
+		return fmt.Errorf("failed to list routes for deletion: %w", err)
 	}
 
 	for _, route := range routeList.Items {
 		if err := r.deleteRoute(ctx, &route); err != nil {
-			return err
+			return fmt.Errorf("failed to delete routes: %w", err)
 		}
 	}
 	return nil
@@ -268,18 +275,17 @@ func (r *ReconcileIngress) reconcileDeletion(ctx context.Context, ing *networkin
 	return r.client.Update(ctx, ing)
 }
 
-func (r *ReconcileIngress) routeList(ctx context.Context, ing *networkingv1alpha1.Ingress) (map[string]string, routev1.RouteList, error) {
+func (r *ReconcileIngress) routeList(ctx context.Context, ing *networkingv1alpha1.Ingress) (routev1.RouteList, error) {
 	ingressLabels := ing.GetLabels()
-	selector := map[string]string{
-		networking.IngressLabelKey:     ing.GetName(),
-		serving.RouteLabelKey:          ingressLabels[serving.RouteLabelKey],
-		serving.RouteNamespaceLabelKey: ingressLabels[serving.RouteNamespaceLabelKey],
-	}
 	listOpts := &client.ListOptions{
-		LabelSelector: labels.SelectorFromSet(selector),
+		LabelSelector: labels.SelectorFromSet(map[string]string{
+			networking.IngressLabelKey:     ing.GetName(),
+			serving.RouteLabelKey:          ingressLabels[serving.RouteLabelKey],
+			serving.RouteNamespaceLabelKey: ingressLabels[serving.RouteNamespaceLabelKey],
+		}),
 	}
 	var routeList routev1.RouteList
-	return selector, routeList, r.client.List(ctx, listOpts, &routeList)
+	return routeList, r.client.List(ctx, listOpts, &routeList)
 }
 
 // Update the Status of the Ingress.  Caller is responsible for checking
@@ -310,28 +316,4 @@ func appendIfAbsent(members []string, routeNamespace string) ([]string, bool) {
 		}
 	}
 	return append(members, routeNamespace), true
-}
-
-func routeMap(routes routev1.RouteList, selector map[string]string) map[string]routev1.Route {
-	mp := make(map[string]routev1.Route, len(routes.Items))
-	for _, route := range routes.Items {
-		// TODO: This routeFilter is used only for testing as fake client does not support list option
-		// and we can't bump the osdk version quickly. ref:
-		// https://github.com/openshift-knative/serverless-operator/serving/ingress/pull/24#discussion_r341804021
-		if routeLabelFilter(route, selector) {
-			mp[route.Name] = route
-		}
-	}
-	return mp
-}
-
-// routeLabelFilter verifies if the route has required labels.
-func routeLabelFilter(route routev1.Route, selector map[string]string) bool {
-	labels := route.GetLabels()
-	for k, v := range selector {
-		if labels[k] != v {
-			return false
-		}
-	}
-	return true
 }
