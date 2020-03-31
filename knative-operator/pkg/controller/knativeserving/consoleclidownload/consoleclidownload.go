@@ -181,7 +181,8 @@ func populateKnLinks(route string) []consolev1.Link {
 	}
 }
 
-func populateKnConsoleCLIDownload(baseURL string) *consolev1.ConsoleCLIDownload {
+func populateKnConsoleCLIDownload(route string) *consolev1.ConsoleCLIDownload {
+	baseURL := fmt.Sprintf("%s", consoleutil.HTTPS(route))
 	return &consolev1.ConsoleCLIDownload{
 		metav1.TypeMeta{
 			Kind:       "ConsoleCLIDownload",
