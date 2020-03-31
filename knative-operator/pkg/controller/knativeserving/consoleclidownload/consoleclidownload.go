@@ -31,7 +31,8 @@ const (
 var log = common.Log.WithName("consoleclidownload")
 
 // Create deploy deployment and CR for kn ConsoleCLIDownload
-func Create(instance *servingv1alpha1.KnativeServing, apiclient client.Client) error {
+func Create(instance *servingv1alpha1.KnativeServing, apiclient client.Client, scheme *runtime.Scheme) error {
+	addToScheme(scheme)
 	if err := createKnDeployment(apiclient); err != nil {
 		return err
 	}
@@ -72,8 +73,6 @@ func createCR(apiclient client.Client) error {
 	log.Info(fmt.Sprintf("Route found for kn %s", knRoute))
 
 	log.Info("Creating ConsoleCLIDownload CR for kn")
-	scheme := runtime.NewScheme()
-	addToScheme(scheme)
 	consoleObj := populateKnConsoleCLIDownload(knRoute)
 	err = apiclient.Create(context.TODO(), consoleObj)
 	if err != nil {
