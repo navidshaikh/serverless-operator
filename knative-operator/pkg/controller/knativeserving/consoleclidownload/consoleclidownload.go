@@ -21,7 +21,7 @@ import (
 
 const (
 	knConsoleCLIDownloadDeployRoute     = "kn-cli-downloads"
-	knConsoleCLIDownloadDeployNamespace = "serverless-operator"
+	knConsoleCLIDownloadDeployNamespace = "kn-cli-downloads"
 )
 
 var log = common.Log.WithName("consoleclidownload")

@@ -1,12 +1,12 @@
 apiVersion: v1
 kind: Namespace
 metadata:
- name: serverless-operator
+ name: kn-cli-downloads
 ---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  namespace: serverless-operator
+  namespace: kn-cli-downloads
   name: kn-cli-downloads
 spec:
   replicas: 2
@@ -108,7 +108,7 @@ spec:
 apiVersion: v1
 kind: Service
 metadata:
-  namespace: serverless-operator
+  namespace: kn-cli-downloads
   name: kn-cli-downloads
 spec:
   ports:
@@ -123,7 +123,7 @@ spec:
 apiVersion: route.openshift.io/v1
 kind: Route
 metadata:
-  namespace: serverless-operator
+  namespace: kn-cli-downloads
   name: kn-cli-downloads
   labels:
     app: serverless-operator
