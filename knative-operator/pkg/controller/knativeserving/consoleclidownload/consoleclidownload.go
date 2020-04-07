@@ -9,17 +9,21 @@ import (
 	"github.com/openshift-knative/serverless-operator/knative-operator/pkg/common"
 
 	mfc "github.com/manifestival/controller-runtime-client"
+	mf "github.com/manifestival/manifestival"
 	consolev1 "github.com/openshift/api/console/v1"
 	routev1 "github.com/openshift/api/route/v1"
 	consoleroute "github.com/openshift/console-operator/pkg/console/subresource/route"
 	consoleutil "github.com/openshift/console-operator/pkg/console/subresource/util"
+	k8sv1 "k8s.io/api/apps/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	servingv1alpha1 "knative.dev/serving-operator/pkg/apis/serving/v1alpha1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 const (
+	knDownloadServer                    = "kn-download-server"
 	knConsoleCLIDownloadDeployRoute     = "kn-cli-downloads"
 	knConsoleCLIDownloadDeployNamespace = "kn-cli-downloads"
 )
@@ -29,7 +33,7 @@ var log = common.Log.WithName("consoleclidownload")
 // Create deploy deployment and CR for kn ConsoleCLIDownload
 func Create(instance *servingv1alpha1.KnativeServing, apiclient client.Client, scheme *runtime.Scheme) error {
 	addToScheme(scheme)
-	if err := createKnDeployment(apiclient); err != nil {
+	if err := createKnDeployment(apiclient, scheme); err != nil {
 		return err
 	}
 
@@ -42,15 +46,20 @@ func Create(instance *servingv1alpha1.KnativeServing, apiclient client.Client, s
 
 // createKnDeployment creates required resources viz Namespace, Deployment, Service, Route
 // which will serve kn cross platform binaries within cluster
-func createKnDeployment(apiclient client.Client) error {
+func createKnDeployment(apiclient client.Client, scheme *runtime.Scheme) error {
 	log.Info("Creating kn ConsoleCLIDownload deployment")
 	manifest, err := mfc.NewManifest(rawManifestKnDownloadResources(), apiclient)
 	if err != nil {
 		return fmt.Errorf("failed to read kn ConsoleCLIDownload deployment manifest: %w", err)
 	}
 
+	manifest, err = manifest.Transform(replaceKnCLIArtifactsImage(os.Getenv("IMAGE_KN_CLI_ARTIFACTS"), scheme))
+	if err != nil {
+		return fmt.Errorf("failed to transform kn ConsoleCLIDownload deployment image: %w", err)
+	}
+
 	if err := manifest.Apply(); err != nil {
-		return fmt.Errorf("failed to apply kn ConsoleCLIDownload deployment manifest: %w", err)
+		return fmt.Errorf("failed to apply kn ConsoleCLIDownload download resources manifest: %w", err)
 	}
 
 	return nil
@@ -114,10 +123,10 @@ func rawManifestKnDownloadResources() string {
 	return os.Getenv("CONSOLECLIDOWNLOAD_MANIFEST_PATH")
 }
 
-// addToScheme registers ConsoleCLIDownload to scheme
+// addToScheme registers ConsoleCLIDownload and Deployment to scheme
 func addToScheme(scheme *runtime.Scheme) {
-	scheme.AddKnownTypes(consolev1.GroupVersion,
-		&consolev1.ConsoleCLIDownload{})
+	scheme.AddKnownTypes(consolev1.GroupVersion, &consolev1.ConsoleCLIDownload{})
+	scheme.AddKnownTypes(k8sv1.SchemeGroupVersion, &k8sv1.Deployment{})
 }
 
 // populateKnConsoleCLIDownload populates kn ConsoleCLIDownload object and its SPEC
@@ -149,5 +158,30 @@ func populateKnConsoleCLIDownload(baseURL string) *consolev1.ConsoleCLIDownload 
 				},
 			},
 		},
+	}
+}
+
+func replaceKnCLIArtifactsImage(image string, scheme *runtime.Scheme) mf.Transformer {
+	return func(u *unstructured.Unstructured) error {
+		if u.GetKind() == "Deployment" {
+			deploy := &k8sv1.Deployment{}
+			if err := scheme.Convert(u, deploy, nil); err != nil {
+				return fmt.Errorf("failed to convert unstructured obj to Deployment: %w", err)
+			}
+
+			containers := deploy.Spec.Template.Spec.Containers
+			for i, container := range containers {
+				if container.Name == knDownloadServer && container.Image != image {
+					log.Info("Replacing", "deployment", container.Name, "image", image)
+					containers[i].Image = image
+					break
+				}
+			}
+
+			if err := scheme.Convert(deploy, u, nil); err != nil {
+				return fmt.Errorf("failed to convert Deployment obj to unstructured: %w", err)
+			}
+		}
+		return nil
 	}
 }

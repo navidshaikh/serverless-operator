@@ -24,7 +24,7 @@ spec:
       containers:
       - name: kn-download-server
         terminationMessagePolicy: FallbackToLogsOnError
-        image: registry.svc.ci.openshift.org/openshift/knative-v0.13.1:kn-cli-artifacts
+        image: IMAGE_KN_CLI_ARTIFACTS
         ports:
         - containerPort: 8080
           name: http
