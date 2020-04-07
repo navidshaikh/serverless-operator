@@ -22,7 +22,7 @@ import (
 const (
 	knConsoleCLIDownloadDeployRoute       = "kn-cli-downloads"
 	knConsoleCLIDownloadDeployNamespace   = "serverless-operator"
-	defaultKnConsoleCLIDownloadDeployment = "deploy/resources/console_cli_download_kn_deployment.yaml"
+	defaultKnConsoleCLIDownloadDeployment = "deploy/resources/console_cli_download_kn_resources.yaml"
 )
 
 var log = common.Log.WithName("consoleclidownload")
@@ -112,7 +112,7 @@ func Delete(instance *servingv1alpha1.KnativeServing, apiclient client.Client) e
 // manifestPathKnConsoleCLIDownloadDeploy returns path of manifest defining deployment
 // resources required for kn ConsoleCLIDownload
 func manifestPathKnConsoleCLIDownloadDeploy() string {
-	knConsoleCLIDownloadDeploy := os.Getenv("CONSOLE_DOWNLOAD_DEPLOY_MANIFEST_PATH")
+	knConsoleCLIDownloadDeploy := os.Getenv("CONSOLECLIDOWNLOAD_MANIFEST_PATH")
 	if knConsoleCLIDownloadDeploy == "" {
 		return defaultKnConsoleCLIDownloadDeployment
 	}
