@@ -20,9 +20,8 @@ import (
 )
 
 const (
-	knConsoleCLIDownloadDeployRoute       = "kn-cli-downloads"
-	knConsoleCLIDownloadDeployNamespace   = "serverless-operator"
-	defaultKnConsoleCLIDownloadDeployment = "deploy/resources/console_cli_download_kn_resources.yaml"
+	knConsoleCLIDownloadDeployRoute     = "kn-cli-downloads"
+	knConsoleCLIDownloadDeployNamespace = "serverless-operator"
 )
 
 var log = common.Log.WithName("consoleclidownload")
@@ -45,7 +44,7 @@ func Create(instance *servingv1alpha1.KnativeServing, apiclient client.Client, s
 // which will serve kn cross platform binaries within cluster
 func createKnDeployment(apiclient client.Client) error {
 	log.Info("Creating kn ConsoleCLIDownload deployment")
-	manifest, err := mfc.NewManifest(manifestPathKnConsoleCLIDownloadDeploy(), apiclient)
+	manifest, err := mfc.NewManifest(rawManifestKnDownloadResources(), apiclient)
 	if err != nil {
 		return fmt.Errorf("failed to read kn ConsoleCLIDownload deployment manifest: %w", err)
 	}
@@ -97,7 +96,7 @@ func Delete(instance *servingv1alpha1.KnativeServing, apiclient client.Client) e
 	}
 
 	log.Info("Deleting kn ConsoleCLIDownload deployment resources")
-	manifest, err := mfc.NewManifest(manifestPathKnConsoleCLIDownloadDeploy(), apiclient)
+	manifest, err := mfc.NewManifest(rawManifestKnDownloadResources(), apiclient)
 	if err != nil {
 		return fmt.Errorf("failed to read kn ConsoleCLIDownload deployment manifest: %w", err)
 	}
@@ -109,15 +108,10 @@ func Delete(instance *servingv1alpha1.KnativeServing, apiclient client.Client) e
 	return nil
 }
 
-// manifestPathKnConsoleCLIDownloadDeploy returns path of manifest defining deployment
-// resources required for kn ConsoleCLIDownload
-func manifestPathKnConsoleCLIDownloadDeploy() string {
-	knConsoleCLIDownloadDeploy := os.Getenv("CONSOLECLIDOWNLOAD_MANIFEST_PATH")
-	if knConsoleCLIDownloadDeploy == "" {
-		return defaultKnConsoleCLIDownloadDeployment
-	}
-
-	return knConsoleCLIDownloadDeploy
+// rawManifestKnDownloadResources returns path of manifest defining required
+// resources for kn ConsoleCLIDownload
+func rawManifestKnDownloadResources() string {
+	return os.Getenv("CONSOLECLIDOWNLOAD_MANIFEST_PATH")
 }
 
 // addToScheme registers ConsoleCLIDownload to scheme
