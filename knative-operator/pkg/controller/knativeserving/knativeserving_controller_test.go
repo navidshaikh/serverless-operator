@@ -55,7 +55,7 @@ var (
 		},
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "kn-cli-downloads",
-			Namespace: "serverless-operator",
+			Namespace: "kn-cli-downloads",
 		},
 		Status: routev1.RouteStatus{
 			Ingress: []routev1.RouteIngress{
@@ -77,7 +77,7 @@ var (
 func init() {
 	os.Setenv("OPERATOR_NAME", "TEST_OPERATOR")
 	os.Setenv("KOURIER_MANIFEST_PATH", "kourier/testdata/kourier-latest.yaml")
-	os.Setenv("CONSOLECLIDOWNLOAD_MANIFEST_PATH", "consoleclidownload/testdata/console_cli_download_kn_deployment.yaml")
+	os.Setenv("CONSOLECLIDOWNLOAD_MANIFEST_PATH", "consoleclidownload/testdata/console_cli_download_kn_resources.yaml")
 }
 
 // TestKourierReconcile runs Reconcile to verify if expected Kourier resources are deleted.
