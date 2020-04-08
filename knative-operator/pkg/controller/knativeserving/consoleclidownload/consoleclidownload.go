@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/openshift-knative/serverless-operator/knative-operator/pkg/common"
@@ -12,20 +13,21 @@ import (
 	mf "github.com/manifestival/manifestival"
 	consolev1 "github.com/openshift/api/console/v1"
 	routev1 "github.com/openshift/api/route/v1"
-	consoleroute "github.com/openshift/console-operator/pkg/console/subresource/route"
-	consoleutil "github.com/openshift/console-operator/pkg/console/subresource/util"
 	k8sv1 "k8s.io/api/apps/v1"
+	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/util/wait"
 	servingv1alpha1 "knative.dev/serving-operator/pkg/apis/serving/v1alpha1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 const (
-	knDownloadServer                    = "kn-download-server"
-	knConsoleCLIDownloadDeployRoute     = "kn-cli-downloads"
-	knConsoleCLIDownloadDeployNamespace = "kn-cli-downloads"
+	knDownloadServer                = "kn-download-server"
+	knConsoleCLIDownloadDeployRoute = "kn-cli-downloads"
+	defaultIngressController        = "default" // value taken from github.com/openshift/console-operator/pkg/console/subresource/route/route.go
 )
 
 var log = common.Log.WithName("consoleclidownload")
@@ -36,7 +38,7 @@ func Apply(instance *servingv1alpha1.KnativeServing, apiclient client.Client, sc
 		return err
 	}
 
-	if err := applyKnConsoleCLIDownload(apiclient); err != nil {
+	if err := applyKnConsoleCLIDownload(apiclient, instance.GetNamespace()); err != nil {
 		return err
 	}
 
@@ -61,31 +63,36 @@ func applyKnDownloadResources(instance *servingv1alpha1.KnativeServing, apiclien
 
 // applyKnConsoleCLIDownload applies kn ConsoleCLIDownload by finding
 // kn download resource route URL and populating spec accordingly
-func applyKnConsoleCLIDownload(apiclient client.Client) error {
+func applyKnConsoleCLIDownload(apiclient client.Client, namespace string) error {
 	route := &routev1.Route{}
-	// Waiting for the deployment/route to appear. TODO: ideally this should be a watch
-	time.Sleep(time.Second * 10)
-	err := apiclient.Get(context.TODO(),
-		client.ObjectKey{Namespace: knConsoleCLIDownloadDeployNamespace, Name: knConsoleCLIDownloadDeployRoute},
-		route)
+	knRoute := ""
+
+	err := wait.PollImmediate(2*time.Second, 20*time.Second, func() (bool, error) {
+		err := apiclient.Get(context.TODO(), client.ObjectKey{Namespace: namespace, Name: knConsoleCLIDownloadDeployRoute}, route)
+		switch {
+		case apierrors.IsNotFound(err):
+			return false, nil
+		case err != nil:
+			return false, err
+		default:
+			knRoute = GetCanonicalHost(route)
+			if knRoute == "" {
+				return false, nil
+			}
+		}
+		return true, nil
+	})
+
 	if err != nil {
-		return fmt.Errorf("failed to find kn ConsoleCLIDownload deployment route: %w", err)
+		return fmt.Errorf("failed to find kn ConsoleCLIDownload deployment route")
 	}
 
-	knRoute := consoleroute.GetCanonicalHost(route)
-	if knRoute == "" {
-		return fmt.Errorf("failed to find kn ConsoleCLIDownload deployment route, it might not be ready yet")
-	}
-
-	log.Info(fmt.Sprintf("kn ConsoleCLIDownload route found %s", knRoute))
 	log.Info("Creating kn ConsoleCLIDownload CR")
-	baseURL := fmt.Sprintf("%s", consoleutil.HTTPS(knRoute))
-	knConsoleObj := populateKnConsoleCLIDownload(baseURL)
+	knConsoleObj := populateKnConsoleCLIDownload(https(knRoute))
 	err = apiclient.Create(context.TODO(), knConsoleObj)
 	if err != nil {
 		return fmt.Errorf("failed to create kn ConsoleCLIDownload CR: %w", err)
 	}
-
 	return nil
 }
 
@@ -195,4 +202,42 @@ func populateKnConsoleCLIDownload(baseURL string) *consolev1.ConsoleCLIDownload 
 			},
 		},
 	}
+}
+
+// Function copied from github.com/openshift/console-operator/pkg/console/subresource/route/route.go and modified
+func GetCanonicalHost(route *routev1.Route) string {
+	for _, ingress := range route.Status.Ingress {
+		if ingress.RouterName != defaultIngressController {
+			continue
+		}
+		// ingress must be admitted before it is useful to us
+		if !isIngressAdmitted(ingress) {
+			continue
+		}
+		return ingress.Host
+	}
+	return ""
+}
+
+func isIngressAdmitted(ingress routev1.RouteIngress) bool {
+	admitted := false
+	for _, condition := range ingress.Conditions {
+		if condition.Type == routev1.RouteAdmitted && condition.Status == corev1.ConditionTrue {
+			admitted = true
+		}
+	}
+	return admitted
+}
+
+// copied from github.com/openshift/console-operator/pkg/console/subresource/util/util.go and modified
+func https(host string) string {
+	protocol := "https://"
+	if host == "" {
+		return ""
+	}
+	if strings.HasPrefix(host, protocol) {
+		return host
+	}
+	secured := fmt.Sprintf("%s%s", protocol, host)
+	return secured
 }
