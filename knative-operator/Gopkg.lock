@@ -410,23 +410,11 @@
   revision = "d4a64ec2cbd86f11ea74dfdcf6520d5833d0c6cd"
 
 [[projects]]
-  digest = "1:3e8b0f8d2ed4b10f83a0719c1e8853bdb4bbce2ca365aba2843dc9487e4ab35c"
-  name = "github.com/openshift/client-go"
-  packages = [
-    "route/clientset/versioned/scheme",
-    "route/clientset/versioned/typed/route/v1",
-  ]
-  pruneopts = "NT"
-  revision = "1fa528d3be060e4c7178eb69e76d37cf7e699e3c"
-  version = "v3.9.0"
-
-[[projects]]
   branch = "master"
   digest = "1:f67f701e8553f7665488b3394e2d39f2aa1c58a2d35fe78d2691731d6f17a5ee"
   name = "github.com/openshift/console-operator"
   packages = [
     "pkg/api",
-    "pkg/console/subresource/route",
     "pkg/console/subresource/util",
   ]
   pruneopts = "NT"
@@ -1070,7 +1058,6 @@
     "github.com/openshift/api/config/v1",
     "github.com/openshift/api/console/v1",
     "github.com/openshift/api/route/v1",
-    "github.com/openshift/console-operator/pkg/console/subresource/route",
     "github.com/openshift/console-operator/pkg/console/subresource/util",
     "github.com/operator-framework/operator-sdk/pkg/k8sutil",
     "github.com/operator-framework/operator-sdk/pkg/kube-metrics",
@@ -1097,6 +1084,7 @@
     "k8s.io/apimachinery/pkg/types",
     "k8s.io/apimachinery/pkg/util/intstr",
     "k8s.io/apimachinery/pkg/util/sets",
+    "k8s.io/apimachinery/pkg/util/wait",
     "k8s.io/client-go/kubernetes/scheme",
     "k8s.io/client-go/plugin/pkg/client/auth",
     "k8s.io/client-go/rest",

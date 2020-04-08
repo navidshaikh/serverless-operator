@@ -339,7 +339,7 @@ spec:
                     - name: KOURIER_MANIFEST_PATH
                       value: deploy/resources/kourier/kourier-latest.yaml
                     - name: CONSOLECLIDOWNLOAD_MANIFEST_PATH
-                      value: deploy/resources/console_cli_download_kn_deployment.yaml
+                      value: deploy/resources/console_cli_download_kn_resources.yaml
                     - name: IMAGE_queue-proxy
                       value: registry.svc.ci.openshift.org/openshift/knative-v0.13.2:knative-serving-queue
                     - name: IMAGE_activator
