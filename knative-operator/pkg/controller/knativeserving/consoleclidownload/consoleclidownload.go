@@ -90,7 +90,7 @@ func applyKnConsoleCLIDownload(apiclient client.Client, namespace string) error 
 	log.Info("Creating kn ConsoleCLIDownload CR")
 	knConsoleObj := populateKnConsoleCLIDownload(https(knRoute))
 	err = apiclient.Create(context.TODO(), knConsoleObj)
-	if err != nil {
+	if err != nil && !apierrors.IsAlreadyExists(err) {
 		return fmt.Errorf("failed to create kn ConsoleCLIDownload CR: %w", err)
 	}
 	return nil
