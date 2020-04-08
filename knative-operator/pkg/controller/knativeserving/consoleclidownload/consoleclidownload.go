@@ -30,44 +30,38 @@ const (
 
 var log = common.Log.WithName("consoleclidownload")
 
-// Create deploy deployment and CR for kn ConsoleCLIDownload
-func Create(instance *servingv1alpha1.KnativeServing, apiclient client.Client, scheme *runtime.Scheme) error {
-	addToScheme(scheme)
-	if err := createKnDeployment(apiclient, scheme); err != nil {
+// Apply installs kn ConsoleCLIDownload and its required resources
+func Apply(instance *servingv1alpha1.KnativeServing, apiclient client.Client, scheme *runtime.Scheme) error {
+	if err := applyKnDownloadResources(instance, apiclient, scheme); err != nil {
 		return err
 	}
 
-	if err := createCR(apiclient); err != nil {
+	if err := applyKnConsoleCLIDownload(apiclient); err != nil {
 		return err
 	}
 
 	return nil
 }
 
-// createKnDeployment creates required resources viz Namespace, Deployment, Service, Route
+// applyKnDownloadResources creates required resources viz Namespace, Deployment, Service, Route
 // which will serve kn cross platform binaries within cluster
-func createKnDeployment(apiclient client.Client, scheme *runtime.Scheme) error {
-	log.Info("Creating kn ConsoleCLIDownload deployment")
-	manifest, err := mfc.NewManifest(rawManifestKnDownloadResources(), apiclient)
+func applyKnDownloadResources(instance *servingv1alpha1.KnativeServing, apiclient client.Client, scheme *runtime.Scheme) error {
+	log.Info("Installing kn ConsoleCLIDownload resources")
+	manifest, err := manifest(instance, apiclient, scheme)
 	if err != nil {
-		return fmt.Errorf("failed to read kn ConsoleCLIDownload deployment manifest: %w", err)
-	}
-
-	manifest, err = manifest.Transform(replaceKnCLIArtifactsImage(os.Getenv("IMAGE_KN_CLI_ARTIFACTS"), scheme))
-	if err != nil {
-		return fmt.Errorf("failed to transform kn ConsoleCLIDownload deployment image: %w", err)
+		return err
 	}
 
 	if err := manifest.Apply(); err != nil {
-		return fmt.Errorf("failed to apply kn ConsoleCLIDownload download resources manifest: %w", err)
+		return fmt.Errorf("failed to apply kn ConsoleCLIDownload resources manifest: %w", err)
 	}
 
 	return nil
 }
 
-// createCR creates kn ConsoleCLIDownload CR. It finds the route serving kn binaries and
-// populates ConsoleCLIDownload object accordingly and creates it.
-func createCR(apiclient client.Client) error {
+// applyKnConsoleCLIDownload applies kn ConsoleCLIDownload by finding
+// kn download resource route URL and populating spec accordingly
+func applyKnConsoleCLIDownload(apiclient client.Client) error {
 	route := &routev1.Route{}
 	// Waiting for the deployment/route to appear. TODO: ideally this should be a watch
 	time.Sleep(time.Second * 10)
@@ -95,38 +89,80 @@ func createCR(apiclient client.Client) error {
 	return nil
 }
 
-// Delete deletes kn ConsoleCLIDownload CR and respective deployment resources
-func Delete(instance *servingv1alpha1.KnativeServing, apiclient client.Client) error {
-	log.Info("Deleting kn ConsoleCLIDownload CR")
-	knConsoleObj := populateKnConsoleCLIDownload("")
-	err := apiclient.Delete(context.TODO(), knConsoleObj)
-	if err != nil {
-		return fmt.Errorf("failed to delete kn ConsoleCLIDownload CR: %w", err)
+// Delete deletes kn ConsoleCLIDownload CO and respective deployment resources
+func Delete(instance *servingv1alpha1.KnativeServing, apiclient client.Client, scheme *runtime.Scheme) error {
+	log.Info("Deleting kn ConsoleCLIDownload CO")
+	if err := apiclient.Delete(context.TODO(), populateKnConsoleCLIDownload("")); err != nil {
+		return fmt.Errorf("failed to delete kn ConsoleCLIDownload CO: %w", err)
 	}
 
-	log.Info("Deleting kn ConsoleCLIDownload deployment resources")
-	manifest, err := mfc.NewManifest(rawManifestKnDownloadResources(), apiclient)
+	log.Info("Deleting kn ConsoleCLIDownload resources")
+	manifest, err := manifest(instance, apiclient, scheme)
 	if err != nil {
-		return fmt.Errorf("failed to read kn ConsoleCLIDownload deployment manifest: %w", err)
+		return err
 	}
 
 	if err := manifest.Delete(); err != nil {
-		return fmt.Errorf("failed to delete kn ConsoleCLIDownload deployment manifest: %w", err)
+		return fmt.Errorf("failed to delete kn ConsoleCLIDownload resources manifest: %w", err)
 	}
 
 	return nil
 }
 
-// rawManifestKnDownloadResources returns path of manifest defining required
-// resources for kn ConsoleCLIDownload
-func rawManifestKnDownloadResources() string {
+// manifest returns kn ConsoleCLIDownload deploymnet resources manifest after traformation
+func manifest(instance *servingv1alpha1.KnativeServing, apiclient client.Client, scheme *runtime.Scheme) (mf.Manifest, error) {
+	manifest, err := rawManifest(apiclient)
+	if err != nil {
+		return mf.Manifest{}, fmt.Errorf("failed to read kn ConsoleCLIDownload deployment manifest: %w", err)
+	}
+
+	// 1. Use instance's namespace to deploy download resources into
+	// 2. Set proper kn-cli-artifacts image
+	transforms := []mf.Transformer{mf.InjectNamespace(instance.GetNamespace()),
+		replaceKnCLIArtifactsImage(os.Getenv("IMAGE_KN_CLI_ARTIFACTS"), scheme),
+	}
+
+	manifest, err = manifest.Transform(transforms...)
+	if err != nil {
+		return mf.Manifest{}, fmt.Errorf("failed to transform kn ConsoleCLIDownload resources manifest: %w", err)
+	}
+
+	return manifest, nil
+}
+
+// manifest returns kn ConsoleCLIDownload deploymnet resources manifest without transformation
+func rawManifest(apiclient client.Client) (mf.Manifest, error) {
+	return mfc.NewManifest(manifestPath(), apiclient, mf.UseLogger(log.WithName("mf")))
+}
+
+// manifestPath returns kn ConsoleCLIDownload deployment resource manifest path
+func manifestPath() string {
 	return os.Getenv("CONSOLECLIDOWNLOAD_MANIFEST_PATH")
 }
 
-// addToScheme registers ConsoleCLIDownload and Deployment to scheme
-func addToScheme(scheme *runtime.Scheme) {
-	scheme.AddKnownTypes(consolev1.GroupVersion, &consolev1.ConsoleCLIDownload{})
-	scheme.AddKnownTypes(k8sv1.SchemeGroupVersion, &k8sv1.Deployment{})
+func replaceKnCLIArtifactsImage(image string, scheme *runtime.Scheme) mf.Transformer {
+	return func(u *unstructured.Unstructured) error {
+		if u.GetKind() == "Deployment" {
+			deploy := &k8sv1.Deployment{}
+			if err := scheme.Convert(u, deploy, nil); err != nil {
+				return fmt.Errorf("failed to convert unstructured obj to Deployment: %w", err)
+			}
+
+			containers := deploy.Spec.Template.Spec.Containers
+			for i, container := range containers {
+				if container.Name == knDownloadServer && container.Image != image {
+					log.Info("Replacing", "deployment", container.Name, "image", image)
+					containers[i].Image = image
+					break
+				}
+			}
+
+			if err := scheme.Convert(deploy, u, nil); err != nil {
+				return fmt.Errorf("failed to convert Deployment obj to unstructured: %w", err)
+			}
+		}
+		return nil
+	}
 }
 
 // populateKnConsoleCLIDownload populates kn ConsoleCLIDownload object and its SPEC
@@ -158,30 +194,5 @@ func populateKnConsoleCLIDownload(baseURL string) *consolev1.ConsoleCLIDownload 
 				},
 			},
 		},
-	}
-}
-
-func replaceKnCLIArtifactsImage(image string, scheme *runtime.Scheme) mf.Transformer {
-	return func(u *unstructured.Unstructured) error {
-		if u.GetKind() == "Deployment" {
-			deploy := &k8sv1.Deployment{}
-			if err := scheme.Convert(u, deploy, nil); err != nil {
-				return fmt.Errorf("failed to convert unstructured obj to Deployment: %w", err)
-			}
-
-			containers := deploy.Spec.Template.Spec.Containers
-			for i, container := range containers {
-				if container.Name == knDownloadServer && container.Image != image {
-					log.Info("Replacing", "deployment", container.Name, "image", image)
-					containers[i].Image = image
-					break
-				}
-			}
-
-			if err := scheme.Convert(deploy, u, nil); err != nil {
-				return fmt.Errorf("failed to convert Deployment obj to unstructured: %w", err)
-			}
-		}
-		return nil
 	}
 }
