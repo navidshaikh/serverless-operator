@@ -75,7 +75,7 @@ func applyKnConsoleCLIDownload(apiclient client.Client, namespace string) error 
 		case err != nil:
 			return false, err
 		default:
-			knRoute = GetCanonicalHost(route)
+			knRoute = getCanonicalHost(route)
 			if knRoute == "" {
 				return false, nil
 			}
@@ -99,7 +99,7 @@ func applyKnConsoleCLIDownload(apiclient client.Client, namespace string) error 
 // Delete deletes kn ConsoleCLIDownload CO and respective deployment resources
 func Delete(instance *servingv1alpha1.KnativeServing, apiclient client.Client, scheme *runtime.Scheme) error {
 	log.Info("Deleting kn ConsoleCLIDownload CO")
-	if err := apiclient.Delete(context.TODO(), populateKnConsoleCLIDownload("")); err != nil {
+	if err := apiclient.Delete(context.TODO(), populateKnConsoleCLIDownload("")); err != nil && !apierrors.IsNotFound(err) {
 		return fmt.Errorf("failed to delete kn ConsoleCLIDownload CO: %w", err)
 	}
 
@@ -109,7 +109,7 @@ func Delete(instance *servingv1alpha1.KnativeServing, apiclient client.Client, s
 		return err
 	}
 
-	if err := manifest.Delete(); err != nil {
+	if err := manifest.Delete(); err != nil && !apierrors.IsNotFound(err) {
 		return fmt.Errorf("failed to delete kn ConsoleCLIDownload resources manifest: %w", err)
 	}
 
@@ -176,14 +176,10 @@ func replaceKnCLIArtifactsImage(image string, scheme *runtime.Scheme) mf.Transfo
 // using route's baseURL
 func populateKnConsoleCLIDownload(baseURL string) *consolev1.ConsoleCLIDownload {
 	return &consolev1.ConsoleCLIDownload{
-		metav1.TypeMeta{
-			Kind:       "ConsoleCLIDownload",
-			APIVersion: "console.openshift.io/v1",
-		},
-		metav1.ObjectMeta{
+		ObjectMeta: metav1.ObjectMeta{
 			Name: "kn-cli-downloads",
 		},
-		consolev1.ConsoleCLIDownloadSpec{
+		Spec: consolev1.ConsoleCLIDownloadSpec{
 			DisplayName: "kn - OpenShift Serverless Command Line Interface (CLI)",
 			Description: "The OpenShift Serverless client `kn` is a CLI tool that allows you to fully manage OpenShift Serverless Serving and Eventing resources without writing a single line of YAML.",
 			Links: []consolev1.Link{
@@ -205,7 +201,7 @@ func populateKnConsoleCLIDownload(baseURL string) *consolev1.ConsoleCLIDownload 
 }
 
 // Function copied from github.com/openshift/console-operator/pkg/console/subresource/route/route.go and modified
-func GetCanonicalHost(route *routev1.Route) string {
+func getCanonicalHost(route *routev1.Route) string {
 	for _, ingress := range route.Status.Ingress {
 		if ingress.RouterName != defaultIngressController {
 			continue
@@ -219,6 +215,7 @@ func GetCanonicalHost(route *routev1.Route) string {
 	return ""
 }
 
+// Function copied from github.com/openshift/console-operator/pkg/console/subresource/route/route.go
 func isIngressAdmitted(ingress routev1.RouteIngress) bool {
 	admitted := false
 	for _, condition := range ingress.Conditions {
