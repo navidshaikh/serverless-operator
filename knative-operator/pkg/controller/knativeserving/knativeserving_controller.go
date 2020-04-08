@@ -144,7 +144,7 @@ func (r *ReconcileKnativeServing) reconcileKnativeServing(instance *servingv1alp
 		r.configure,
 		r.ensureFinalizers,
 		r.ensureCustomCertsConfigMap,
-		r.createConsoleCLIDownload,
+		r.installKnConsoleCLIDownload,
 		r.installKourier,
 		r.updateDeployment,
 		r.deleteVirtualService,
@@ -275,9 +275,9 @@ func (r *ReconcileKnativeServing) installKourier(instance *servingv1alpha1.Knati
 	return kourier.Apply(instance, r.client, r.scheme)
 }
 
-// createConsoleCLIDownload creates CR for kn CLI download link
-func (r *ReconcileKnativeServing) createConsoleCLIDownload(instance *servingv1alpha1.KnativeServing) error {
-	return consoleclidownload.Create(instance, r.client, r.scheme)
+// installKnConsoleCLIDownload creates CR for kn CLI download link
+func (r *ReconcileKnativeServing) installKnConsoleCLIDownload(instance *servingv1alpha1.KnativeServing) error {
+	return consoleclidownload.Apply(instance, r.client, r.scheme)
 }
 
 // general clean-up, mostly resources in different namespaces from servingv1alpha1.KnativeServing.
@@ -295,9 +295,9 @@ func (r *ReconcileKnativeServing) delete(instance *servingv1alpha1.KnativeServin
 		return fmt.Errorf("failed to delete kourier: %w", err)
 	}
 
-	log.Info("Deleting ConsoleCLIDownload")
-	if err := consoleclidownload.Delete(instance, r.client); err != nil {
-		return fmt.Errorf("failed to delete ConsoleCLIDownload: %w", err)
+	log.Info("Deleting kn ConsoleCLIDownload")
+	if err := consoleclidownload.Delete(instance, r.client, r.scheme); err != nil {
+		return fmt.Errorf("failed to delete kn ConsoleCLIDownload: %w", err)
 	}
 
 	// The above might take a while, so we refetch the resource again in case it has changed.

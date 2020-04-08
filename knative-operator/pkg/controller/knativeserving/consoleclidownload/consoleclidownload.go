@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/openshift-knative/serverless-operator/knative-operator/pkg/common"
@@ -12,153 +13,138 @@ import (
 	mf "github.com/manifestival/manifestival"
 	consolev1 "github.com/openshift/api/console/v1"
 	routev1 "github.com/openshift/api/route/v1"
-	consoleroute "github.com/openshift/console-operator/pkg/console/subresource/route"
-	consoleutil "github.com/openshift/console-operator/pkg/console/subresource/util"
 	k8sv1 "k8s.io/api/apps/v1"
+	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/util/wait"
 	servingv1alpha1 "knative.dev/serving-operator/pkg/apis/serving/v1alpha1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 const (
-	knDownloadServer                    = "kn-download-server"
-	knConsoleCLIDownloadDeployRoute     = "kn-cli-downloads"
-	knConsoleCLIDownloadDeployNamespace = "kn-cli-downloads"
+	knDownloadServer                = "kn-download-server"
+	knConsoleCLIDownloadDeployRoute = "kn-cli-downloads"
+	defaultIngressController        = "default" // value taken from github.com/openshift/console-operator/pkg/console/subresource/route/route.go
 )
 
 var log = common.Log.WithName("consoleclidownload")
 
-// Create deploy deployment and CR for kn ConsoleCLIDownload
-func Create(instance *servingv1alpha1.KnativeServing, apiclient client.Client, scheme *runtime.Scheme) error {
-	addToScheme(scheme)
-	if err := createKnDeployment(apiclient, scheme); err != nil {
+// Apply installs kn ConsoleCLIDownload and its required resources
+func Apply(instance *servingv1alpha1.KnativeServing, apiclient client.Client, scheme *runtime.Scheme) error {
+	if err := applyKnDownloadResources(instance, apiclient, scheme); err != nil {
 		return err
 	}
 
-	if err := createCR(apiclient); err != nil {
+	if err := applyKnConsoleCLIDownload(apiclient, instance.GetNamespace()); err != nil {
 		return err
 	}
 
 	return nil
 }
 
-// createKnDeployment creates required resources viz Namespace, Deployment, Service, Route
+// applyKnDownloadResources creates required resources viz Namespace, Deployment, Service, Route
 // which will serve kn cross platform binaries within cluster
-func createKnDeployment(apiclient client.Client, scheme *runtime.Scheme) error {
-	log.Info("Creating kn ConsoleCLIDownload deployment")
-	manifest, err := mfc.NewManifest(rawManifestKnDownloadResources(), apiclient)
+func applyKnDownloadResources(instance *servingv1alpha1.KnativeServing, apiclient client.Client, scheme *runtime.Scheme) error {
+	log.Info("Installing kn ConsoleCLIDownload resources")
+	manifest, err := manifest(instance, apiclient, scheme)
 	if err != nil {
-		return fmt.Errorf("failed to read kn ConsoleCLIDownload deployment manifest: %w", err)
-	}
-
-	manifest, err = manifest.Transform(replaceKnCLIArtifactsImage(os.Getenv("IMAGE_KN_CLI_ARTIFACTS"), scheme))
-	if err != nil {
-		return fmt.Errorf("failed to transform kn ConsoleCLIDownload deployment image: %w", err)
+		return err
 	}
 
 	if err := manifest.Apply(); err != nil {
-		return fmt.Errorf("failed to apply kn ConsoleCLIDownload download resources manifest: %w", err)
+		return fmt.Errorf("failed to apply kn ConsoleCLIDownload resources manifest: %w", err)
 	}
 
 	return nil
 }
 
-// createCR creates kn ConsoleCLIDownload CR. It finds the route serving kn binaries and
-// populates ConsoleCLIDownload object accordingly and creates it.
-func createCR(apiclient client.Client) error {
+// applyKnConsoleCLIDownload applies kn ConsoleCLIDownload by finding
+// kn download resource route URL and populating spec accordingly
+func applyKnConsoleCLIDownload(apiclient client.Client, namespace string) error {
 	route := &routev1.Route{}
-	// Waiting for the deployment/route to appear. TODO: ideally this should be a watch
-	time.Sleep(time.Second * 10)
-	err := apiclient.Get(context.TODO(),
-		client.ObjectKey{Namespace: knConsoleCLIDownloadDeployNamespace, Name: knConsoleCLIDownloadDeployRoute},
-		route)
+	knRoute := ""
+
+	err := wait.PollImmediate(2*time.Second, 20*time.Second, func() (bool, error) {
+		err := apiclient.Get(context.TODO(), client.ObjectKey{Namespace: namespace, Name: knConsoleCLIDownloadDeployRoute}, route)
+		switch {
+		case apierrors.IsNotFound(err):
+			return false, nil
+		case err != nil:
+			return false, err
+		default:
+			knRoute = getCanonicalHost(route)
+			if knRoute == "" {
+				return false, nil
+			}
+		}
+		return true, nil
+	})
+
 	if err != nil {
-		return fmt.Errorf("failed to find kn ConsoleCLIDownload deployment route: %w", err)
+		return fmt.Errorf("failed to find kn ConsoleCLIDownload deployment route")
 	}
 
-	knRoute := consoleroute.GetCanonicalHost(route)
-	if knRoute == "" {
-		return fmt.Errorf("failed to find kn ConsoleCLIDownload deployment route, it might not be ready yet")
-	}
-
-	log.Info(fmt.Sprintf("kn ConsoleCLIDownload route found %s", knRoute))
 	log.Info("Creating kn ConsoleCLIDownload CR")
-	baseURL := fmt.Sprintf("%s", consoleutil.HTTPS(knRoute))
-	knConsoleObj := populateKnConsoleCLIDownload(baseURL)
+	knConsoleObj := populateKnConsoleCLIDownload(https(knRoute))
 	err = apiclient.Create(context.TODO(), knConsoleObj)
 	if err != nil {
 		return fmt.Errorf("failed to create kn ConsoleCLIDownload CR: %w", err)
 	}
+	return nil
+}
+
+// Delete deletes kn ConsoleCLIDownload CO and respective deployment resources
+func Delete(instance *servingv1alpha1.KnativeServing, apiclient client.Client, scheme *runtime.Scheme) error {
+	log.Info("Deleting kn ConsoleCLIDownload CO")
+	if err := apiclient.Delete(context.TODO(), populateKnConsoleCLIDownload("")); err != nil && !apierrors.IsNotFound(err) {
+		return fmt.Errorf("failed to delete kn ConsoleCLIDownload CO: %w", err)
+	}
+
+	log.Info("Deleting kn ConsoleCLIDownload resources")
+	manifest, err := manifest(instance, apiclient, scheme)
+	if err != nil {
+		return err
+	}
+
+	if err := manifest.Delete(); err != nil && !apierrors.IsNotFound(err) {
+		return fmt.Errorf("failed to delete kn ConsoleCLIDownload resources manifest: %w", err)
+	}
 
 	return nil
 }
 
-// Delete deletes kn ConsoleCLIDownload CR and respective deployment resources
-func Delete(instance *servingv1alpha1.KnativeServing, apiclient client.Client) error {
-	log.Info("Deleting kn ConsoleCLIDownload CR")
-	knConsoleObj := populateKnConsoleCLIDownload("")
-	err := apiclient.Delete(context.TODO(), knConsoleObj)
+// manifest returns kn ConsoleCLIDownload deploymnet resources manifest after traformation
+func manifest(instance *servingv1alpha1.KnativeServing, apiclient client.Client, scheme *runtime.Scheme) (mf.Manifest, error) {
+	manifest, err := rawManifest(apiclient)
 	if err != nil {
-		return fmt.Errorf("failed to delete kn ConsoleCLIDownload CR: %w", err)
+		return mf.Manifest{}, fmt.Errorf("failed to read kn ConsoleCLIDownload deployment manifest: %w", err)
 	}
 
-	log.Info("Deleting kn ConsoleCLIDownload deployment resources")
-	manifest, err := mfc.NewManifest(rawManifestKnDownloadResources(), apiclient)
+	// 1. Use instance's namespace to deploy download resources into
+	// 2. Set proper kn-cli-artifacts image
+	transforms := []mf.Transformer{mf.InjectNamespace(instance.GetNamespace()),
+		replaceKnCLIArtifactsImage(os.Getenv("IMAGE_KN_CLI_ARTIFACTS"), scheme),
+	}
+
+	manifest, err = manifest.Transform(transforms...)
 	if err != nil {
-		return fmt.Errorf("failed to read kn ConsoleCLIDownload deployment manifest: %w", err)
+		return mf.Manifest{}, fmt.Errorf("failed to transform kn ConsoleCLIDownload resources manifest: %w", err)
 	}
 
-	if err := manifest.Delete(); err != nil {
-		return fmt.Errorf("failed to delete kn ConsoleCLIDownload deployment manifest: %w", err)
-	}
-
-	return nil
+	return manifest, nil
 }
 
-// rawManifestKnDownloadResources returns path of manifest defining required
-// resources for kn ConsoleCLIDownload
-func rawManifestKnDownloadResources() string {
+// manifest returns kn ConsoleCLIDownload deploymnet resources manifest without transformation
+func rawManifest(apiclient client.Client) (mf.Manifest, error) {
+	return mfc.NewManifest(manifestPath(), apiclient, mf.UseLogger(log.WithName("mf")))
+}
+
+// manifestPath returns kn ConsoleCLIDownload deployment resource manifest path
+func manifestPath() string {
 	return os.Getenv("CONSOLECLIDOWNLOAD_MANIFEST_PATH")
-}
-
-// addToScheme registers ConsoleCLIDownload and Deployment to scheme
-func addToScheme(scheme *runtime.Scheme) {
-	scheme.AddKnownTypes(consolev1.GroupVersion, &consolev1.ConsoleCLIDownload{})
-	scheme.AddKnownTypes(k8sv1.SchemeGroupVersion, &k8sv1.Deployment{})
-}
-
-// populateKnConsoleCLIDownload populates kn ConsoleCLIDownload object and its SPEC
-// using route's baseURL
-func populateKnConsoleCLIDownload(baseURL string) *consolev1.ConsoleCLIDownload {
-	return &consolev1.ConsoleCLIDownload{
-		metav1.TypeMeta{
-			Kind:       "ConsoleCLIDownload",
-			APIVersion: "console.openshift.io/v1",
-		},
-		metav1.ObjectMeta{
-			Name: "kn-cli-downloads",
-		},
-		consolev1.ConsoleCLIDownloadSpec{
-			DisplayName: "kn - OpenShift Serverless Command Line Interface (CLI)",
-			Description: "The OpenShift Serverless client `kn` is a CLI tool that allows you to fully manage OpenShift Serverless Serving and Eventing resources without writing a single line of YAML.",
-			Links: []consolev1.Link{
-				consolev1.Link{
-					Text: "Download kn for Linux",
-					Href: baseURL + "/amd64/linux/kn-linux-amd64.tar.gz",
-				},
-				consolev1.Link{
-					Text: "Download kn for macOS",
-					Href: baseURL + "/amd64/macos/kn-macos-amd64.tar.gz",
-				},
-				consolev1.Link{
-					Text: "Download kn for Windows",
-					Href: baseURL + "/amd64/windows/kn-windows-amd64.zip",
-				},
-			},
-		},
-	}
 }
 
 func replaceKnCLIArtifactsImage(image string, scheme *runtime.Scheme) mf.Transformer {
@@ -184,4 +170,71 @@ func replaceKnCLIArtifactsImage(image string, scheme *runtime.Scheme) mf.Transfo
 		}
 		return nil
 	}
+}
+
+// populateKnConsoleCLIDownload populates kn ConsoleCLIDownload object and its SPEC
+// using route's baseURL
+func populateKnConsoleCLIDownload(baseURL string) *consolev1.ConsoleCLIDownload {
+	return &consolev1.ConsoleCLIDownload{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "kn-cli-downloads",
+		},
+		Spec: consolev1.ConsoleCLIDownloadSpec{
+			DisplayName: "kn - OpenShift Serverless Command Line Interface (CLI)",
+			Description: "The OpenShift Serverless client `kn` is a CLI tool that allows you to fully manage OpenShift Serverless Serving and Eventing resources without writing a single line of YAML.",
+			Links: []consolev1.Link{
+				consolev1.Link{
+					Text: "Download kn for Linux",
+					Href: baseURL + "/amd64/linux/kn-linux-amd64.tar.gz",
+				},
+				consolev1.Link{
+					Text: "Download kn for macOS",
+					Href: baseURL + "/amd64/macos/kn-macos-amd64.tar.gz",
+				},
+				consolev1.Link{
+					Text: "Download kn for Windows",
+					Href: baseURL + "/amd64/windows/kn-windows-amd64.zip",
+				},
+			},
+		},
+	}
+}
+
+// Function copied from github.com/openshift/console-operator/pkg/console/subresource/route/route.go and modified
+func getCanonicalHost(route *routev1.Route) string {
+	for _, ingress := range route.Status.Ingress {
+		if ingress.RouterName != defaultIngressController {
+			continue
+		}
+		// ingress must be admitted before it is useful to us
+		if !isIngressAdmitted(ingress) {
+			continue
+		}
+		return ingress.Host
+	}
+	return ""
+}
+
+// Function copied from github.com/openshift/console-operator/pkg/console/subresource/route/route.go
+func isIngressAdmitted(ingress routev1.RouteIngress) bool {
+	admitted := false
+	for _, condition := range ingress.Conditions {
+		if condition.Type == routev1.RouteAdmitted && condition.Status == corev1.ConditionTrue {
+			admitted = true
+		}
+	}
+	return admitted
+}
+
+// copied from github.com/openshift/console-operator/pkg/console/subresource/util/util.go and modified
+func https(host string) string {
+	protocol := "https://"
+	if host == "" {
+		return ""
+	}
+	if strings.HasPrefix(host, protocol) {
+		return host
+	}
+	secured := fmt.Sprintf("%s%s", protocol, host)
+	return secured
 }
