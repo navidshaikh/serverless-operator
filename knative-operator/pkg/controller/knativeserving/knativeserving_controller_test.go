@@ -57,7 +57,7 @@ var (
 		},
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "kn-cli-downloads",
-			Namespace: "kn-cli-downloads",
+			Namespace: "knative-serving",
 		},
 		Status: routev1.RouteStatus{
 			Ingress: []routev1.RouteIngress{
@@ -117,6 +117,7 @@ func TestKourierReconcile(t *testing.T) {
 			ks := &defaultKnativeServing
 			ingress := &defaultIngress
 			knRoute := &defaultKnRoute
+			ccd := &consolev1.ConsoleCLIDownload{}
 
 			initObjs := []runtime.Object{ks, ingress, knRoute}
 
@@ -126,6 +127,7 @@ func TestKourierReconcile(t *testing.T) {
 			s.AddKnownTypes(configv1.SchemeGroupVersion, ingress)
 			s.AddKnownTypes(v1alpha3.SchemeGroupVersion, &v1alpha3.VirtualServiceList{})
 			s.AddKnownTypes(routev1.GroupVersion, knRoute)
+			s.AddKnownTypes(consolev1.GroupVersion, ccd)
 
 			cl := fake.NewFakeClient(initObjs...)
 			r := &ReconcileKnativeServing{client: cl, scheme: s}
@@ -143,7 +145,6 @@ func TestKourierReconcile(t *testing.T) {
 			}
 
 			// Check kn ConsoleCLIDownload CR
-			ccd := &consolev1.ConsoleCLIDownload{}
 			err = cl.Get(context.TODO(), types.NamespacedName{Name: "kn-cli-downloads", Namespace: ""}, ccd)
 			if err != nil {
 				t.Fatalf("get: (%v)", err)
