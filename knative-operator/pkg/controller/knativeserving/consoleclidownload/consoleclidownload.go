@@ -119,6 +119,20 @@ func applyKnConsoleCLIDownload(apiclient client.Client, namespace string) error 
 		log.Info("Creating kn ConsoleCLIDownload")
 		if err := apiclient.Create(context.TODO(), knConsoleObj); err != nil {
 			return err
+		} else {
+			// handle upgrade scenario: In 1.6 we'd created kn ConsoleCLIDownload CO with
+			// name 'kn'. See https://github.com/openshift-knative/serverless-operator/blob/release-1.6/knative-operator/deploy/resources/console_cli_download_kn.yaml#L4
+			// lets delete the earlier CO if it exists
+			// TODO: Remove this post 1.7 release
+			knConsoleOld := &consolev1.ConsoleCLIDownload{}
+			if err := apiclient.Get(context.TODO(), client.ObjectKey{Namespace: "", Name: "kn"}, knConsoleOld); err == nil {
+				log.Info("Found old kn ConsoleCLIDownload CO 'kn', deleting it..")
+				if err := apiclient.Delete(context.TODO(), knConsoleOld); err != nil {
+					log.Info("failed to delete earlier kn ConsoleCLIDownload CO 'kn' %w", err)
+				}
+				log.Info("Deleted old kn ConsoleCLIDownload CO 'kn'")
+			}
+
 		}
 	case apierrors.IsAlreadyExists(err):
 		log.Info("Updating kn ConsoleCLIDownload")
