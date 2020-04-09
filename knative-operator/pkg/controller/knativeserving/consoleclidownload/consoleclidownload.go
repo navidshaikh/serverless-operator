@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"strings"
-	"time"
 
 	"github.com/openshift-knative/serverless-operator/knative-operator/pkg/common"
 
@@ -13,21 +12,23 @@ import (
 	mf "github.com/manifestival/manifestival"
 	consolev1 "github.com/openshift/api/console/v1"
 	routev1 "github.com/openshift/api/route/v1"
-	k8sv1 "k8s.io/api/apps/v1"
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/apimachinery/pkg/util/wait"
 	servingv1alpha1 "knative.dev/serving-operator/pkg/apis/serving/v1alpha1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 const (
+	knCLIDownload                   = "kn-cli-downloads"
 	knDownloadServer                = "kn-download-server"
 	knConsoleCLIDownloadDeployRoute = "kn-cli-downloads"
 	defaultIngressController        = "default" // value taken from github.com/openshift/console-operator/pkg/console/subresource/route/route.go
+	OwnerName                       = "serving.knative.openshift.io/ownerName"
+	OwnerNamespace                  = "serving.knative.openshift.io/ownerNamespace"
 )
 
 var log = common.Log.WithName("consoleclidownload")
@@ -58,40 +59,72 @@ func applyKnDownloadResources(instance *servingv1alpha1.KnativeServing, apiclien
 		return fmt.Errorf("failed to apply kn ConsoleCLIDownload resources manifest: %w", err)
 	}
 
+	if err := checkDeployments(&manifest, instance, apiclient); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// Check for deployments of kn ConsoleCLIDownload
+// This function is copied from knativeserving_controller.go in serving-operator
+func checkDeployments(manifest *mf.Manifest, instance *servingv1alpha1.KnativeServing, api client.Client) error {
+	log.Info("Checking deployments")
+	for _, u := range manifest.Filter(mf.ByKind("Deployment"), mf.ByKind("Route")).Resources() {
+		switch u.GetKind() {
+		case "Deployment":
+			deployment := &appsv1.Deployment{}
+			err := api.Get(context.TODO(), client.ObjectKey{Namespace: u.GetNamespace(), Name: u.GetName()}, deployment)
+			if err != nil {
+				return err
+			}
+			for _, c := range deployment.Status.Conditions {
+				if c.Type == appsv1.DeploymentAvailable && c.Status != corev1.ConditionTrue {
+					return fmt.Errorf("Deployment %q/%q not ready", u.GetName(), u.GetNamespace())
+				}
+			}
+		case "Route":
+			route := &routev1.Route{}
+			if err := api.Get(context.TODO(), client.ObjectKey{Namespace: u.GetNamespace(), Name: u.GetName()}, route); err != nil {
+				return err
+			}
+			host := getCanonicalHost(route)
+			if host == "" {
+				return fmt.Errorf("Route %q/%q not ready yet", u.GetName(), u.GetNamespace())
+			}
+		}
+	}
 	return nil
 }
 
 // applyKnConsoleCLIDownload applies kn ConsoleCLIDownload by finding
 // kn download resource route URL and populating spec accordingly
 func applyKnConsoleCLIDownload(apiclient client.Client, namespace string) error {
+	log.Info("Installing kn ConsoleCLIDownload")
 	route := &routev1.Route{}
-	knRoute := ""
+	knConsole := &consolev1.ConsoleCLIDownload{}
 
-	err := wait.PollImmediate(2*time.Second, 20*time.Second, func() (bool, error) {
-		err := apiclient.Get(context.TODO(), client.ObjectKey{Namespace: namespace, Name: knConsoleCLIDownloadDeployRoute}, route)
-		switch {
-		case apierrors.IsNotFound(err):
-			return false, nil
-		case err != nil:
-			return false, err
-		default:
-			knRoute = getCanonicalHost(route)
-			if knRoute == "" {
-				return false, nil
-			}
-		}
-		return true, nil
-	})
-
-	if err != nil {
+	// find the route first
+	if err := apiclient.Get(context.TODO(), client.ObjectKey{Namespace: namespace, Name: knConsoleCLIDownloadDeployRoute}, route); err != nil {
 		return fmt.Errorf("failed to find kn ConsoleCLIDownload deployment route")
 	}
 
-	log.Info("Creating kn ConsoleCLIDownload CR")
+	knRoute := getCanonicalHost(route)
 	knConsoleObj := populateKnConsoleCLIDownload(https(knRoute))
-	err = apiclient.Create(context.TODO(), knConsoleObj)
-	if err != nil && !apierrors.IsAlreadyExists(err) {
-		return fmt.Errorf("failed to create kn ConsoleCLIDownload CR: %w", err)
+
+	// Check if kn ConsoleCLIDownload exists
+	err := apiclient.Get(context.TODO(), client.ObjectKey{Namespace: "", Name: knCLIDownload}, knConsole)
+	switch {
+	case apierrors.IsNotFound(err):
+		if err := apiclient.Create(context.TODO(), knConsoleObj); err != nil {
+			return err
+		}
+	case apierrors.IsAlreadyExists(err):
+		if err := apiclient.Update(context.TODO(), knConsoleObj); err != nil {
+			return err
+		}
+	default:
+		return err
 	}
 	return nil
 }
@@ -118,15 +151,17 @@ func Delete(instance *servingv1alpha1.KnativeServing, apiclient client.Client, s
 
 // manifest returns kn ConsoleCLIDownload deploymnet resources manifest after traformation
 func manifest(instance *servingv1alpha1.KnativeServing, apiclient client.Client, scheme *runtime.Scheme) (mf.Manifest, error) {
-	manifest, err := rawManifest(apiclient)
+	manifest, err := RawManifest(apiclient)
 	if err != nil {
 		return mf.Manifest{}, fmt.Errorf("failed to read kn ConsoleCLIDownload deployment manifest: %w", err)
 	}
 
 	// 1. Use instance's namespace to deploy download resources into
 	// 2. Set proper kn-cli-artifacts image
+	// 3. Set Owner annotations
 	transforms := []mf.Transformer{mf.InjectNamespace(instance.GetNamespace()),
 		replaceKnCLIArtifactsImage(os.Getenv("IMAGE_KN_CLI_ARTIFACTS"), scheme),
+		setOwnerAnnotations(instance),
 	}
 
 	manifest, err = manifest.Transform(transforms...)
@@ -138,7 +173,7 @@ func manifest(instance *servingv1alpha1.KnativeServing, apiclient client.Client,
 }
 
 // manifest returns kn ConsoleCLIDownload deploymnet resources manifest without transformation
-func rawManifest(apiclient client.Client) (mf.Manifest, error) {
+func RawManifest(apiclient client.Client) (mf.Manifest, error) {
 	return mfc.NewManifest(manifestPath(), apiclient, mf.UseLogger(log.WithName("mf")))
 }
 
@@ -150,7 +185,7 @@ func manifestPath() string {
 func replaceKnCLIArtifactsImage(image string, scheme *runtime.Scheme) mf.Transformer {
 	return func(u *unstructured.Unstructured) error {
 		if u.GetKind() == "Deployment" {
-			deploy := &k8sv1.Deployment{}
+			deploy := &appsv1.Deployment{}
 			if err := scheme.Convert(u, deploy, nil); err != nil {
 				return fmt.Errorf("failed to convert unstructured obj to Deployment: %w", err)
 			}
@@ -172,12 +207,22 @@ func replaceKnCLIArtifactsImage(image string, scheme *runtime.Scheme) mf.Transfo
 	}
 }
 
+func setOwnerAnnotations(instance *servingv1alpha1.KnativeServing) mf.Transformer {
+	return func(u *unstructured.Unstructured) error {
+		u.SetAnnotations(map[string]string{
+			OwnerName:      instance.Name,
+			OwnerNamespace: instance.Namespace,
+		})
+		return nil
+	}
+}
+
 // populateKnConsoleCLIDownload populates kn ConsoleCLIDownload object and its SPEC
 // using route's baseURL
 func populateKnConsoleCLIDownload(baseURL string) *consolev1.ConsoleCLIDownload {
 	return &consolev1.ConsoleCLIDownload{
 		ObjectMeta: metav1.ObjectMeta{
-			Name: "kn-cli-downloads",
+			Name: knCLIDownload,
 		},
 		Spec: consolev1.ConsoleCLIDownloadSpec{
 			DisplayName: "kn - OpenShift Serverless Command Line Interface (CLI)",

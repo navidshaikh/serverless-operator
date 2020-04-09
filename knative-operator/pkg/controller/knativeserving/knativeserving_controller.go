@@ -95,6 +95,39 @@ func add(mgr manager.Manager, r reconcile.Reconciler) error {
 			return err
 		}
 	}
+
+	// Watch for kn ConsoleCLIDownload
+	knManifest, err := consoleclidownload.RawManifest(mgr.GetClient())
+	if err != nil {
+		return err
+	}
+	knResources := knManifest.Resources()
+
+	gvkToCCD := make(map[schema.GroupVersionKind]runtime.Object)
+	for i := range knResources {
+		resource := &knResources[i]
+		gvkToCCD[resource.GroupVersionKind()] = resource
+	}
+
+	for _, t := range gvkToCCD {
+		err = c.Watch(&source.Kind{Type: t}, &handler.EnqueueRequestsFromMapFunc{
+			ToRequests: handler.ToRequestsFunc(func(obj handler.MapObject) []reconcile.Request {
+				annotations := obj.Meta.GetAnnotations()
+				ownerNamespace := annotations[consoleclidownload.OwnerNamespace]
+				ownerName := annotations[consoleclidownload.OwnerName]
+				if ownerNamespace != "" && ownerName != "" {
+					return []reconcile.Request{{
+						NamespacedName: types.NamespacedName{Namespace: ownerNamespace, Name: ownerName},
+					}}
+				}
+				return nil
+			})})
+
+		if err != nil {
+			return err
+		}
+	}
+
 	return nil
 }
 
