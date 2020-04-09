@@ -39,7 +39,7 @@ func Apply(instance *servingv1alpha1.KnativeServing, apiclient client.Client, sc
 		return err
 	}
 
-	if err := applyKnConsoleCLIDownload(apiclient, instance.GetNamespace()); err != nil {
+	if err := applyKnConsoleCLIDownload(apiclient, instance); err != nil {
 		return err
 	}
 
@@ -99,18 +99,19 @@ func checkDeployments(manifest *mf.Manifest, instance *servingv1alpha1.KnativeSe
 
 // applyKnConsoleCLIDownload applies kn ConsoleCLIDownload by finding
 // kn download resource route URL and populating spec accordingly
-func applyKnConsoleCLIDownload(apiclient client.Client, namespace string) error {
+func applyKnConsoleCLIDownload(apiclient client.Client, instance *servingv1alpha1.KnativeServing) error {
+
 	log.Info("Installing kn ConsoleCLIDownload")
 	route := &routev1.Route{}
 	knConsole := &consolev1.ConsoleCLIDownload{}
 
 	// find the route first
-	if err := apiclient.Get(context.TODO(), client.ObjectKey{Namespace: namespace, Name: knConsoleCLIDownloadDeployRoute}, route); err != nil {
+	if err := apiclient.Get(context.TODO(), client.ObjectKey{Namespace: instance.GetNamespace(), Name: knConsoleCLIDownloadDeployRoute}, route); err != nil {
 		return fmt.Errorf("failed to find kn ConsoleCLIDownload deployment route")
 	}
 
 	knRoute := getCanonicalHost(route)
-	knConsoleObj := populateKnConsoleCLIDownload(https(knRoute))
+	knConsoleObj := populateKnConsoleCLIDownload(https(knRoute), instance)
 
 	// Check if kn ConsoleCLIDownload exists
 	err := apiclient.Get(context.TODO(), client.ObjectKey{Namespace: "", Name: knCLIDownload}, knConsole)
@@ -148,7 +149,7 @@ func applyKnConsoleCLIDownload(apiclient client.Client, namespace string) error 
 // Delete deletes kn ConsoleCLIDownload CO and respective deployment resources
 func Delete(instance *servingv1alpha1.KnativeServing, apiclient client.Client, scheme *runtime.Scheme) error {
 	log.Info("Deleting kn ConsoleCLIDownload CO")
-	if err := apiclient.Delete(context.TODO(), populateKnConsoleCLIDownload("")); err != nil && !apierrors.IsNotFound(err) {
+	if err := apiclient.Delete(context.TODO(), populateKnConsoleCLIDownload("", nil)); err != nil && !apierrors.IsNotFound(err) {
 		return fmt.Errorf("failed to delete kn ConsoleCLIDownload CO: %w", err)
 	}
 
@@ -235,10 +236,18 @@ func setOwnerAnnotations(instance *servingv1alpha1.KnativeServing) mf.Transforme
 
 // populateKnConsoleCLIDownload populates kn ConsoleCLIDownload object and its SPEC
 // using route's baseURL
-func populateKnConsoleCLIDownload(baseURL string) *consolev1.ConsoleCLIDownload {
+func populateKnConsoleCLIDownload(baseURL string, instance *servingv1alpha1.KnativeServing) *consolev1.ConsoleCLIDownload {
+	anno := make(map[string]string)
+	if instance != nil {
+		anno = map[string]string{
+			OwnerName:      instance.Name,
+			OwnerNamespace: instance.Namespace,
+		}
+	}
 	return &consolev1.ConsoleCLIDownload{
 		ObjectMeta: metav1.ObjectMeta{
-			Name: knCLIDownload,
+			Name:        knCLIDownload,
+			Annotations: anno,
 		},
 		Spec: consolev1.ConsoleCLIDownloadSpec{
 			DisplayName: "kn - OpenShift Serverless Command Line Interface (CLI)",
