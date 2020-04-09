@@ -8,6 +8,7 @@ import (
 	"github.com/openshift-knative/serverless-operator/knative-operator/pkg/common"
 	"github.com/openshift-knative/serverless-operator/knative-operator/pkg/controller/knativeserving/consoleclidownload"
 	"github.com/openshift-knative/serverless-operator/knative-operator/pkg/controller/knativeserving/kourier"
+	consolev1 "github.com/openshift/api/console/v1"
 	"github.com/operator-framework/operator-sdk/pkg/predicate"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -120,7 +121,7 @@ func add(mgr manager.Manager, r reconcile.Reconciler) error {
 		}
 	}
 
-	// Watch for kn ConsoleCLIDownload
+	// Watch for kn ConsoleCLIDownload resources
 	knManifest, err := consoleclidownload.RawManifest(mgr.GetClient())
 	if err != nil {
 		return err
@@ -150,6 +151,24 @@ func add(mgr manager.Manager, r reconcile.Reconciler) error {
 		if err != nil {
 			return err
 		}
+	}
+
+	// Watch for kn ConsoleCLIDownload CO
+	err = c.Watch(&source.Kind{Type: &consolev1.ConsoleCLIDownload{}}, &handler.EnqueueRequestsFromMapFunc{
+		ToRequests: handler.ToRequestsFunc(func(obj handler.MapObject) []reconcile.Request {
+			annotations := obj.Meta.GetAnnotations()
+			ownerNamespace := annotations[consoleclidownload.OwnerNamespace]
+			ownerName := annotations[consoleclidownload.OwnerName]
+			if ownerNamespace != "" && ownerName != "" {
+				return []reconcile.Request{{
+					NamespacedName: types.NamespacedName{Namespace: ownerNamespace, Name: ownerName},
+				}}
+			}
+			return nil
+		})})
+
+	if err != nil {
+		return err
 	}
 
 	return nil
