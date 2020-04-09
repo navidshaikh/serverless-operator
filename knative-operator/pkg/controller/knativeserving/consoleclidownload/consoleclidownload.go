@@ -113,7 +113,7 @@ func applyKnConsoleCLIDownload(apiclient client.Client, namespace string) error 
 	knConsoleObj := populateKnConsoleCLIDownload(https(knRoute))
 
 	// Check if kn ConsoleCLIDownload exists
-	err := apiclient.Get(context.TODO(), client.ObjectKey{Namespace: namespace, Name: knCLIDownload}, knConsole)
+	err := apiclient.Get(context.TODO(), client.ObjectKey{Namespace: "", Name: knCLIDownload}, knConsole)
 	switch {
 	case apierrors.IsNotFound(err):
 		if err := apiclient.Create(context.TODO(), knConsoleObj); err != nil {
