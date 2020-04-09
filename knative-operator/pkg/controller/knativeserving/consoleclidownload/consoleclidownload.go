@@ -127,7 +127,7 @@ func applyKnConsoleCLIDownload(apiclient client.Client, namespace string) error 
 			knConsoleOld := &consolev1.ConsoleCLIDownload{}
 			if err := apiclient.Get(context.TODO(), client.ObjectKey{Namespace: "", Name: "kn"}, knConsoleOld); err == nil {
 				log.Info("Found old kn ConsoleCLIDownload CO 'kn', deleting it..")
-				if err := apiclient.Delete(context.TODO, knConsoleOld); err != nil {
+				if err := apiclient.Delete(context.TODO(), knConsoleOld); err != nil {
 					log.Info("failed to delete earlier kn ConsoleCLIDownload CO 'kn' %w", err)
 				}
 				log.Info("Deleted old kn ConsoleCLIDownload CO 'kn'")
