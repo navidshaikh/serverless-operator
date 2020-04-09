@@ -98,6 +98,18 @@ func add(mgr manager.Manager, r reconcile.Reconciler) error {
 	}
 
 	// Watch for kn ConsoleCLIDownload resources
+	knToRequestsFunc := handler.ToRequestsFunc(func(obj handler.MapObject) []reconcile.Request {
+		annotations := obj.Meta.GetAnnotations()
+		ownerNamespace := annotations[consoleclidownload.OwnerNamespace]
+		ownerName := annotations[consoleclidownload.OwnerName]
+		if ownerNamespace != "" && ownerName != "" {
+			return []reconcile.Request{{
+				NamespacedName: types.NamespacedName{Namespace: ownerNamespace, Name: ownerName},
+			}}
+		}
+		return nil
+	})
+
 	knManifest, err := consoleclidownload.RawManifest(mgr.GetClient())
 	if err != nil {
 		return err
@@ -111,38 +123,14 @@ func add(mgr manager.Manager, r reconcile.Reconciler) error {
 	}
 
 	for _, t := range gvkToCCD {
-		err = c.Watch(&source.Kind{Type: t}, &handler.EnqueueRequestsFromMapFunc{
-			ToRequests: handler.ToRequestsFunc(func(obj handler.MapObject) []reconcile.Request {
-				annotations := obj.Meta.GetAnnotations()
-				ownerNamespace := annotations[consoleclidownload.OwnerNamespace]
-				ownerName := annotations[consoleclidownload.OwnerName]
-				if ownerNamespace != "" && ownerName != "" {
-					return []reconcile.Request{{
-						NamespacedName: types.NamespacedName{Namespace: ownerNamespace, Name: ownerName},
-					}}
-				}
-				return nil
-			})})
-
+		err = c.Watch(&source.Kind{Type: t}, &handler.EnqueueRequestsFromMapFunc{ToRequests: knToRequestsFunc})
 		if err != nil {
 			return err
 		}
 	}
 
 	// Watch for kn ConsoleCLIDownload CO
-	err = c.Watch(&source.Kind{Type: &consolev1.ConsoleCLIDownload{}}, &handler.EnqueueRequestsFromMapFunc{
-		ToRequests: handler.ToRequestsFunc(func(obj handler.MapObject) []reconcile.Request {
-			annotations := obj.Meta.GetAnnotations()
-			ownerNamespace := annotations[consoleclidownload.OwnerNamespace]
-			ownerName := annotations[consoleclidownload.OwnerName]
-			if ownerNamespace != "" && ownerName != "" {
-				return []reconcile.Request{{
-					NamespacedName: types.NamespacedName{Namespace: ownerNamespace, Name: ownerName},
-				}}
-			}
-			return nil
-		})})
-
+	err = c.Watch(&source.Kind{Type: &consolev1.ConsoleCLIDownload{}}, &handler.EnqueueRequestsFromMapFunc{ToRequests: knToRequestsFunc})
 	if err != nil {
 		return err
 	}
