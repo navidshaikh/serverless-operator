@@ -124,11 +124,13 @@ func applyKnConsoleCLIDownload(apiclient client.Client, namespace string) error 
 			// name 'kn'. See https://github.com/openshift-knative/serverless-operator/blob/release-1.6/knative-operator/deploy/resources/console_cli_download_kn.yaml#L4
 			// lets delete the earlier CO if it exists
 			// TODO: Remove this post 1.7 release
-			if err := apiclient.Get(context.TODO(), client.ObjectKey{Namespace: "", Name: "kn"}, knConsole); err != nil {
-				if err := apiclient.Delete(context.TODO(), oldKnConsoleCLIDownload("kn")); err != nil {
-					log.Info("failed to delete earlier kn ConsoleCLIDownload CO 'kn'")
+			knConsoleOld := &consolev1.ConsoleCLIDownload{}
+			if err := apiclient.Get(context.TODO(), client.ObjectKey{Namespace: "", Name: "kn"}, knConsoleOld); err == nil {
+				log.Info("Found old kn ConsoleCLIDownload CO 'kn', deleting it..")
+				if err := apiclient.Delete(context.TODO, knConsoleOld); err != nil {
+					log.Info("failed to delete earlier kn ConsoleCLIDownload CO 'kn' %w", err)
 				}
-				log.Info("Deleted earlier kn ConsoleCLIDownload CO 'kn'")
+				log.Info("Deleted old kn ConsoleCLIDownload CO 'kn'")
 			}
 
 		}
@@ -228,15 +230,6 @@ func setOwnerAnnotations(instance *servingv1alpha1.KnativeServing) mf.Transforme
 			OwnerNamespace: instance.Namespace,
 		})
 		return nil
-	}
-}
-
-// oldKnConsoleCLIDownload returns ConsoleCLIDownload object with given name
-func oldKnConsoleCLIDownload(name string) *consolev1.ConsoleCLIDownload {
-	return &consolev1.ConsoleCLIDownload{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: name,
-		},
 	}
 }
 
