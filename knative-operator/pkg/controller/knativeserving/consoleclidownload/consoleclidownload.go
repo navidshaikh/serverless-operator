@@ -123,13 +123,22 @@ func reconcileKnConsoleCLIDownload(apiclient client.Client, instance *servingv1a
 			return err
 		}
 	case err == nil:
-		if equality.Semantic.DeepEqual(knCCDGet, knConsoleObj) {
-			log.Info("No change in kn ConsoleCLIDownload")
+		knCCDCopy := knCCDGet.DeepCopy()
+		change := false
+		if !equality.Semantic.DeepEqual(knCCDGet.Annotations, knConsoleObj.Annotations) {
+			change = true
+			knCCDCopy.Annotations = knConsoleObj.Annotations
+		}
+		if !equality.Semantic.DeepEqual(knCCDGet.Spec, knConsoleObj.Spec) {
+			change = true
+			knCCDCopy.Spec = knConsoleObj.Spec
+		}
+		// Update only if there's is a change
+		if !change {
 			return nil
 		}
-
 		log.Info("Updating kn ConsoleCLIDownload..")
-		if err := apiclient.Update(ctx, knConsoleObj); err != nil {
+		if err := apiclient.Update(ctx, knCCDCopy); err != nil {
 			return err
 		}
 	default:
