@@ -90,6 +90,19 @@ func add(mgr manager.Manager, r reconcile.Reconciler) error {
 		return err
 	}
 
+	// common function to enqueue reconcile requests for resources
+	enqueueRequests := handler.ToRequestsFunc(func(obj handler.MapObject) []reconcile.Request {
+		annotations := obj.Meta.GetAnnotations()
+		ownerNamespace := annotations[common.ServingOwnerNamespace]
+		ownerName := annotations[common.ServingOwnerName]
+		if ownerNamespace != "" && ownerName != "" {
+			return []reconcile.Request{{
+				NamespacedName: types.NamespacedName{Namespace: ownerNamespace, Name: ownerName},
+			}}
+		}
+		return nil
+	})
+
 	// Watch for Kourier resources.
 	manifest, err := kourier.RawManifest(mgr.GetClient())
 	if err != nil {
@@ -104,59 +117,33 @@ func add(mgr manager.Manager, r reconcile.Reconciler) error {
 	}
 
 	for _, t := range gvkToKourier {
-		err = c.Watch(&source.Kind{Type: t}, &handler.EnqueueRequestsFromMapFunc{
-			ToRequests: handler.ToRequestsFunc(func(obj handler.MapObject) []reconcile.Request {
-				annotations := obj.Meta.GetAnnotations()
-				ownerNamespace := annotations[kourier.OwnerNamespace]
-				ownerName := annotations[kourier.OwnerName]
-				if ownerNamespace != "" && ownerName != "" {
-					return []reconcile.Request{{
-						NamespacedName: types.NamespacedName{Namespace: ownerNamespace, Name: ownerName},
-					}}
-				}
-				return nil
-			})})
+		err = c.Watch(&source.Kind{Type: t}, &handler.EnqueueRequestsFromMapFunc{ToRequests: enqueueRequests})
 		if err != nil {
 			return err
 		}
 	}
 
 	// Watch for kn ConsoleCLIDownload resources
-	knToRequestsFunc := handler.ToRequestsFunc(func(obj handler.MapObject) []reconcile.Request {
-		annotations := obj.Meta.GetAnnotations()
-		ownerNamespace := annotations[consoleclidownload.OwnerNamespace]
-		ownerName := annotations[consoleclidownload.OwnerName]
-		if ownerNamespace != "" && ownerName != "" {
-			return []reconcile.Request{{
-				NamespacedName: types.NamespacedName{Namespace: ownerNamespace, Name: ownerName},
-			}}
-		}
-		return nil
-	})
-
 	knManifest, err := consoleclidownload.RawManifest(mgr.GetClient())
 	if err != nil {
 		return err
 	}
-	knResources := knManifest.Resources()
 
+	knResources := knManifest.Resources()
 	gvkToCCD := make(map[schema.GroupVersionKind]runtime.Object)
 	for i := range knResources {
 		resource := &knResources[i]
 		gvkToCCD[resource.GroupVersionKind()] = resource
 	}
 
+	// append ConsoleCLIDownload type as well to Watch for kn CCD CO
+	gvkToCCD[consolev1.GroupVersion.WithKind("ConsoleCLIDownload")] = &consolev1.ConsoleCLIDownload{}
+
 	for _, t := range gvkToCCD {
-		err = c.Watch(&source.Kind{Type: t}, &handler.EnqueueRequestsFromMapFunc{ToRequests: knToRequestsFunc})
+		err = c.Watch(&source.Kind{Type: t}, &handler.EnqueueRequestsFromMapFunc{ToRequests: enqueueRequests})
 		if err != nil {
 			return err
 		}
-	}
-
-	// Watch for kn ConsoleCLIDownload CO
-	err = c.Watch(&source.Kind{Type: &consolev1.ConsoleCLIDownload{}}, &handler.EnqueueRequestsFromMapFunc{ToRequests: knToRequestsFunc})
-	if err != nil {
-		return err
 	}
 
 	return nil

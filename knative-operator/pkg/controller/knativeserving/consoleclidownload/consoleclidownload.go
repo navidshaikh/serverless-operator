@@ -14,6 +14,7 @@ import (
 	routev1 "github.com/openshift/api/route/v1"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/equality"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -26,29 +27,26 @@ const (
 	knCLIDownload                   = "kn-cli-downloads"
 	knDownloadServer                = "kn-download-server"
 	knConsoleCLIDownloadDeployRoute = "kn-cli-downloads"
-	defaultIngressController        = "default" // value taken from github.com/openshift/console-operator/pkg/console/subresource/route/route.go
-	OwnerName                       = "serving.knative.openshift.io/ownerName"
-	OwnerNamespace                  = "serving.knative.openshift.io/ownerNamespace"
 )
 
 var log = common.Log.WithName("consoleclidownload")
 
 // Apply installs kn ConsoleCLIDownload and its required resources
 func Apply(instance *servingv1alpha1.KnativeServing, apiclient client.Client, scheme *runtime.Scheme) error {
-	if err := applyKnDownloadResources(instance, apiclient, scheme); err != nil {
+	if err := reconcileKnCCDResources(instance, apiclient, scheme); err != nil {
 		return err
 	}
 
-	if err := applyKnConsoleCLIDownload(apiclient, instance); err != nil {
+	if err := reconcileKnConsoleCLIDownload(apiclient, instance); err != nil {
 		return err
 	}
 
 	return nil
 }
 
-// applyKnDownloadResources creates required resources viz Namespace, Deployment, Service, Route
+// reconcileKnCCDResources creates required resources viz Namespace, Deployment, Service, Route
 // which will serve kn cross platform binaries within cluster
-func applyKnDownloadResources(instance *servingv1alpha1.KnativeServing, apiclient client.Client, scheme *runtime.Scheme) error {
+func reconcileKnCCDResources(instance *servingv1alpha1.KnativeServing, apiclient client.Client, scheme *runtime.Scheme) error {
 	log.Info("Installing kn ConsoleCLIDownload resources")
 	manifest, err := manifest(instance, apiclient, scheme)
 	if err != nil {
@@ -59,16 +57,15 @@ func applyKnDownloadResources(instance *servingv1alpha1.KnativeServing, apiclien
 		return fmt.Errorf("failed to apply kn ConsoleCLIDownload resources manifest: %w", err)
 	}
 
-	if err := checkDeployments(&manifest, instance, apiclient); err != nil {
+	if err := checkResources(&manifest, instance, apiclient); err != nil {
 		return err
 	}
 
 	return nil
 }
 
-// Check for deployments of kn ConsoleCLIDownload
-// This function is copied from knativeserving_controller.go in serving-operator
-func checkDeployments(manifest *mf.Manifest, instance *servingv1alpha1.KnativeServing, api client.Client) error {
+// Check for deployment and Route of kn ConsoleCLIDownload resources
+func checkResources(manifest *mf.Manifest, instance *servingv1alpha1.KnativeServing, api client.Client) error {
 	log.Info("Checking deployments")
 	for _, u := range manifest.Filter(mf.ByKind("Deployment"), mf.ByKind("Route")).Resources() {
 		switch u.GetKind() {
@@ -80,7 +77,7 @@ func checkDeployments(manifest *mf.Manifest, instance *servingv1alpha1.KnativeSe
 			}
 			for _, c := range deployment.Status.Conditions {
 				if c.Type == appsv1.DeploymentAvailable && c.Status != corev1.ConditionTrue {
-					return fmt.Errorf("Deployment %q/%q not ready", u.GetName(), u.GetNamespace())
+					return fmt.Errorf("deployment %q/%q not ready yet", u.GetName(), u.GetNamespace())
 				}
 			}
 		case "Route":
@@ -90,52 +87,49 @@ func checkDeployments(manifest *mf.Manifest, instance *servingv1alpha1.KnativeSe
 			}
 			host := getCanonicalHost(route)
 			if host == "" {
-				return fmt.Errorf("Route %q/%q not ready yet", u.GetName(), u.GetNamespace())
+				return fmt.Errorf("route %q/%q not ready yet", u.GetName(), u.GetNamespace())
 			}
 		}
 	}
 	return nil
 }
 
-// applyKnConsoleCLIDownload applies kn ConsoleCLIDownload by finding
+// reconcileKnConsoleCLIDownload applies kn ConsoleCLIDownload by finding
 // kn download resource route URL and populating spec accordingly
-func applyKnConsoleCLIDownload(apiclient client.Client, instance *servingv1alpha1.KnativeServing) error {
+func reconcileKnConsoleCLIDownload(apiclient client.Client, instance *servingv1alpha1.KnativeServing) error {
 
 	log.Info("Installing kn ConsoleCLIDownload")
 	route := &routev1.Route{}
-	knConsole := &consolev1.ConsoleCLIDownload{}
+	ctx := context.TODO()
 
 	// find the route first
-	if err := apiclient.Get(context.TODO(), client.ObjectKey{Namespace: instance.GetNamespace(), Name: knConsoleCLIDownloadDeployRoute}, route); err != nil {
+	if err := apiclient.Get(ctx, client.ObjectKey{Namespace: instance.GetNamespace(), Name: knConsoleCLIDownloadDeployRoute}, route); err != nil {
 		return fmt.Errorf("failed to find kn ConsoleCLIDownload deployment route")
 	}
-
 	knRoute := getCanonicalHost(route)
+	// re-verify if the route has a URL
+	if knRoute == "" {
+		return fmt.Errorf("found empty URL of route %q/%q", route.GetNamespace(), route.GetName())
+	}
+
+	knCCDGet := &consolev1.ConsoleCLIDownload{}
 	knConsoleObj := populateKnConsoleCLIDownload(https(knRoute), instance)
 
 	// Check if kn ConsoleCLIDownload exists
-	err := apiclient.Get(context.TODO(), client.ObjectKey{Namespace: "", Name: knCLIDownload}, knConsole)
+	err := apiclient.Get(ctx, client.ObjectKey{Namespace: "", Name: knCLIDownload}, knCCDGet)
 	switch {
 	case apierrors.IsNotFound(err):
-		if err := apiclient.Create(context.TODO(), knConsoleObj); err != nil {
+		if err := apiclient.Create(ctx, knConsoleObj); err != nil {
 			return err
-		} else {
-			// handle upgrade scenario: In 1.6 we'd created kn ConsoleCLIDownload CO with
-			// name 'kn'. See https://github.com/openshift-knative/serverless-operator/blob/release-1.6/knative-operator/deploy/resources/console_cli_download_kn.yaml#L4
-			// lets delete the earlier CO if it exists
-			// TODO: Remove this post 1.7 release
-			knConsoleOld := &consolev1.ConsoleCLIDownload{}
-			if err := apiclient.Get(context.TODO(), client.ObjectKey{Namespace: "", Name: "kn"}, knConsoleOld); err == nil {
-				log.Info("Found old kn ConsoleCLIDownload CO 'kn', deleting it..")
-				if err := apiclient.Delete(context.TODO(), knConsoleOld); err != nil {
-					log.Info("failed to delete earlier kn ConsoleCLIDownload CO 'kn' %w", err)
-				}
-				log.Info("Deleted old kn ConsoleCLIDownload CO 'kn'")
-			}
-
 		}
-	case apierrors.IsAlreadyExists(err):
-		if err := apiclient.Update(context.TODO(), knConsoleObj); err != nil {
+	case err == nil:
+		if equality.Semantic.DeepEqual(knCCDGet, knConsoleObj) {
+			log.Info("No change in kn ConsoleCLIDownload")
+			return nil
+		}
+
+		log.Info("Updating kn ConsoleCLIDownload..")
+		if err := apiclient.Update(ctx, knConsoleObj); err != nil {
 			return err
 		}
 	default:
@@ -225,8 +219,8 @@ func replaceKnCLIArtifactsImage(image string, scheme *runtime.Scheme) mf.Transfo
 func setOwnerAnnotations(instance *servingv1alpha1.KnativeServing) mf.Transformer {
 	return func(u *unstructured.Unstructured) error {
 		u.SetAnnotations(map[string]string{
-			OwnerName:      instance.Name,
-			OwnerNamespace: instance.Namespace,
+			common.ServingOwnerName:      instance.Name,
+			common.ServingOwnerNamespace: instance.Namespace,
 		})
 		return nil
 	}
@@ -238,8 +232,8 @@ func populateKnConsoleCLIDownload(baseURL string, instance *servingv1alpha1.Knat
 	anno := make(map[string]string)
 	if instance != nil {
 		anno = map[string]string{
-			OwnerName:      instance.Name,
-			OwnerNamespace: instance.Namespace,
+			common.ServingOwnerName:      instance.Name,
+			common.ServingOwnerNamespace: instance.Namespace,
 		}
 	}
 	return &consolev1.ConsoleCLIDownload{
@@ -271,9 +265,6 @@ func populateKnConsoleCLIDownload(baseURL string, instance *servingv1alpha1.Knat
 // Function copied from github.com/openshift/console-operator/pkg/console/subresource/route/route.go and modified
 func getCanonicalHost(route *routev1.Route) string {
 	for _, ingress := range route.Status.Ingress {
-		if ingress.RouterName != defaultIngressController {
-			continue
-		}
 		// ingress must be admitted before it is useful to us
 		if !isIngressAdmitted(ingress) {
 			continue
@@ -285,24 +276,22 @@ func getCanonicalHost(route *routev1.Route) string {
 
 // Function copied from github.com/openshift/console-operator/pkg/console/subresource/route/route.go
 func isIngressAdmitted(ingress routev1.RouteIngress) bool {
-	admitted := false
 	for _, condition := range ingress.Conditions {
 		if condition.Type == routev1.RouteAdmitted && condition.Status == corev1.ConditionTrue {
-			admitted = true
+			return true
 		}
 	}
-	return admitted
+	return false
 }
 
 // copied from github.com/openshift/console-operator/pkg/console/subresource/util/util.go and modified
 func https(host string) string {
-	protocol := "https://"
 	if host == "" {
 		return ""
 	}
+	protocol := "https://"
 	if strings.HasPrefix(host, protocol) {
 		return host
 	}
-	secured := fmt.Sprintf("%s%s", protocol, host)
-	return secured
+	return protocol + host
 }
