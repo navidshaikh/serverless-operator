@@ -52,9 +52,6 @@ var (
 	}
 
 	defaultKnRoute = routev1.Route{
-		TypeMeta: metav1.TypeMeta{
-			Kind: "ConsoleCLIDownload",
-		},
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "kn-cli-downloads",
 			Namespace: "knative-serving",
@@ -145,7 +142,7 @@ func TestKourierReconcile(t *testing.T) {
 			}
 
 			// Check kn ConsoleCLIDownload CR
-			err = cl.Get(context.TODO(), types.NamespacedName{Name: "kn-cli-downloads", Namespace: ""}, ccd)
+			err = cl.Get(context.TODO(), types.NamespacedName{Name: "kn", Namespace: ""}, ccd)
 			if err != nil {
 				t.Fatalf("get: (%v)", err)
 			}

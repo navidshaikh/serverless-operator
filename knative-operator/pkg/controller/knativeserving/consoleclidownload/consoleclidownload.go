@@ -24,7 +24,7 @@ import (
 )
 
 const (
-	knCLIDownload                   = "kn-cli-downloads"
+	knCLIDownload                   = "kn"
 	knDownloadServer                = "kn-download-server"
 	knConsoleCLIDownloadDeployRoute = "kn-cli-downloads"
 )
