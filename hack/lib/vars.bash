@@ -50,3 +50,4 @@ export OLM_CHANNEL="${OLM_CHANNEL:-"4.3"}"
 # Change this when upgrades need switching to a different channel
 export OLM_UPGRADE_CHANNEL="${OLM_UPGRADE_CHANNEL:-"$OLM_CHANNEL"}"
 export OLM_SOURCE="${OLM_SOURCE:-"$OPERATOR"}"
+readonly INSTALL_EVENTING="${INSTALL_EVENTING:-"true"}"

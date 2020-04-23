@@ -46,7 +46,10 @@ function remove_installplan {
 function install_serverless_latest {
   deploy_serverless_operator_latest || return $?
   deploy_knativeserving_cr || return $?
-  deploy_knativeeventing_cr || return $?
+  if [[ $INSTALL_EVENTING == "true" ]]; then
+    deploy_knativeeventing_cr || return $?
+  fi
+
 }
 
 function deploy_serverless_operator_latest {
